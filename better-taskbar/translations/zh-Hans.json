@@ -16,7 +16,8 @@
   },
   "notify": {
     "action_failed": "Umbriel 拒绝了 {action}",
-    "launch_failed": "无法启动此应用"
+    "launch_failed": "无法启动此应用",
+    "pin_failed": "无法固定 {app}：未找到对应的 .desktop 文件"
   },
   "settings": {
     "active_indicator_color": {

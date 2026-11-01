@@ -71,6 +71,30 @@ local function savePins()
   end
 end
 
+-- A pin doubles as a gtk-launch desktop ID, so only IDs with a matching
+-- .desktop file are pinnable. Window app_ids (class names) do not always
+-- correspond to one (StartupWMClass, --app-id overrides), so verify before
+-- adding. Checks the standard XDG application directories; dotted IDs may
+-- exist either flat (org.kde.dolphin.desktop) or as a path (org/kde/...).
+local DESKTOP_CHECK_SNIPPET = [[
+id="${1%.desktop}"; p="${id//./\/}"; found=1
+IFS=':' read -ra dirs <<< "${XDG_DATA_HOME:-$HOME/.local/share}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}:$HOME/.flatpak/exports/share:/var/lib/flatpak/exports/share"
+for d in "${dirs[@]}"; do
+  [ -f "$d/applications/$id.desktop" ] && { found=0; break; }
+  [ -f "$d/applications/$p.desktop" ] && { found=0; break; }
+done
+exit $found
+]]
+
+local function hasDesktopFile(appId, onResult)
+  return noctalia.runAsync(
+    { "bash", "-c", DESKTOP_CHECK_SNIPPET, "better-taskbar-desktop-check", appId },
+    function(result)
+      onResult(result ~= nil and result.exitCode == 0)
+    end
+  )
+end
+
 local function loadPins()
   local path = pinsPath()
   if path ~= nil and noctalia.fileExists(path) then
@@ -166,19 +190,37 @@ local function togglePin(appId)
     return
   end
   local lower = string.lower(appId)
-  local nextPins = {}
   local removed = false
   for _, pin in ipairs(pins) do
     if string.lower(pin) == lower then
       removed = true
-    else
-      table.insert(nextPins, pin)
+      break
     end
   end
-  if not removed then
-    table.insert(nextPins, appId)
+  if removed then
+    local nextPins = {}
+    for _, pin in ipairs(pins) do
+      if string.lower(pin) ~= lower then
+        table.insert(nextPins, pin)
+      end
+    end
+    setPins(nextPins)
+    return
   end
-  setPins(nextPins)
+  -- Pinning: require a matching .desktop file, otherwise the entry could
+  -- never be launched and its icon lookup would fail.
+  hasDesktopFile(appId, function(ok)
+    if not ok then
+      noctalia.notifyError(noctalia.tr("notify.pin_failed"), appId)
+      return
+    end
+    local nextPins = {}
+    for _, pin in ipairs(pins) do
+      table.insert(nextPins, pin)
+    end
+    table.insert(nextPins, appId)
+    setPins(nextPins)
+  end)
 end
 
 local function movePin(appId, direction)
