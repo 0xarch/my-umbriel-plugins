@@ -7,7 +7,7 @@
 
 id = "io.soloev/better-taskbar"
 name = "Better Taskbar"
-version = "0.1.0"
+version = "0.2.0"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"
@@ -52,6 +52,7 @@ hover_highlight = false
   label_key = "settings.show_running.label"
   description_key = "settings.show_running.description"
   default = true
+  visible_when = { key = "group_by_workspace", values = ["false"] }
 
   [[widget.setting]]
   key = "icon_scale"
@@ -72,6 +73,7 @@ hover_highlight = false
   min = 0
   max = 48
   step = 1
+  visible_when = { key = "group_by_workspace", values = ["false"] }
 
   [[widget.setting]]
   key = "pinned_opacity"
@@ -82,6 +84,7 @@ hover_highlight = false
   min = 0.0
   max = 1.0
   step = 0.01
+  visible_when = { key = "group_by_workspace", values = ["false"] }
 
   [[widget.setting]]
   key = "show_active_indicator"
@@ -123,6 +126,7 @@ hover_highlight = false
   label_key = "settings.show_window_title.label"
   description_key = "settings.show_window_title.description"
   default = false
+  visible_when = { key = "group_by_workspace", values = ["false"] }
 
   [[widget.setting]]
   key = "window_title_max_width"
@@ -133,6 +137,7 @@ hover_highlight = false
   min = 10
   max = 200
   step = 1
+  visible_when = { key = "group_by_workspace", values = ["false"] }
 
   [[widget.setting]]
   key = "taskbar_max_width"
@@ -143,6 +148,7 @@ hover_highlight = false
   min = 10
   max = 8192
   step = 1
+  visible_when = { key = "group_by_workspace", values = ["false"] }
 
   [[widget.setting]]
   key = "group_by_workspace"
@@ -164,6 +170,7 @@ hover_highlight = false
   label_key = "settings.hide_empty_workspaces.label"
   description_key = "settings.hide_empty_workspaces.description"
   default = false
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "group_single_icon_per_app"
@@ -171,6 +178,7 @@ hover_highlight = false
   label_key = "settings.group_single_icon_per_app.label"
   description_key = "settings.group_single_icon_per_app.description"
   default = false
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "workspace_group_content"
@@ -183,6 +191,7 @@ hover_highlight = false
     { value = "count", label_key = "settings.workspace_group_content.count" },
     { value = "dots", label_key = "settings.workspace_group_content.dots" },
   ]
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "workspace_group_capsule"
@@ -190,6 +199,7 @@ hover_highlight = false
   label_key = "settings.workspace_group_capsule.label"
   description_key = "settings.workspace_group_capsule.description"
   default = true
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "workspace_group_active_border_color"
@@ -197,6 +207,7 @@ hover_highlight = false
   label_key = "settings.workspace_group_active_border_color.label"
   description_key = "settings.workspace_group_active_border_color.description"
   default = "primary"
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "workspace_group_inactive_border_color"
@@ -204,6 +215,7 @@ hover_highlight = false
   label_key = "settings.workspace_group_inactive_border_color.label"
   description_key = "settings.workspace_group_inactive_border_color.description"
   default = "outline_variant"
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "show_workspace_label"
@@ -211,6 +223,7 @@ hover_highlight = false
   label_key = "settings.show_workspace_label.label"
   description_key = "settings.show_workspace_label.description"
   default = true
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "minimal"
@@ -218,6 +231,7 @@ hover_highlight = false
   label_key = "settings.minimal.label"
   description_key = "settings.minimal.description"
   default = false
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "focused_color"
@@ -225,6 +239,7 @@ hover_highlight = false
   label_key = "settings.focused_color.label"
   description_key = "settings.focused_color.description"
   default = "primary"
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "occupied_color"
@@ -232,6 +247,7 @@ hover_highlight = false
   label_key = "settings.occupied_color.label"
   description_key = "settings.occupied_color.description"
   default = "secondary"
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "empty_color"
@@ -239,6 +255,7 @@ hover_highlight = false
   label_key = "settings.empty_color.label"
   description_key = "settings.empty_color.description"
   default = "secondary"
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
   [[widget.setting]]
   key = "urgent_color"
@@ -246,6 +263,7 @@ hover_highlight = false
   label_key = "settings.urgent_color.label"
   description_key = "settings.urgent_color.description"
   default = "error"
+  visible_when = { key = "group_by_workspace", values = ["true"] }
 
 [[panel]]
 id = "menu"

@@ -11,6 +11,7 @@ local STATE_KEY = "better-taskbar.state"
 local REQUEST_KEY = "better-taskbar.request"
 local MENU_KEY = "better-taskbar.menu"
 local PANEL_ID = "io.soloev/better-taskbar:menu"
+local DRAG_TYPE = "pin-reorder"
 
 local snapshot = noctalia.state.get(STATE_KEY)
 local hovered = nil
@@ -86,8 +87,15 @@ local function iconSize()
   return 16 * C.iconScale
 end
 
+-- Fix 1: dot overlays the icon bottom via negative gap, so total stack height
+-- equals iconSize and the icon is naturally centered in the tile.
 local function dotSize()
   return math.max(4, math.floor(16 * 0.32 + 0.5))
+end
+
+-- Fix 2: square tile size for circular hover highlight.
+local function tileSize()
+  return math.ceil(iconSize() + 12)
 end
 
 local function lower(value)
@@ -262,7 +270,10 @@ local function makeDot(fill, size)
   })
 end
 
-local function makeTile(tile, showTitles, titleWidth)
+-- makeTile builds a tile row. When `clickFn` is provided it becomes the
+-- onClick; when nil (pinned tiles wrapped in dragSource), onClick is omitted
+-- because the dragSource handles it.
+local function makeTile(tile, showTitles, titleWidth, clickFn)
   local key = tile.key
   local isVertical = barWidget.isVertical()
 
@@ -283,6 +294,8 @@ local function makeTile(tile, showTitles, titleWidth)
     }))
   end
 
+  -- Fix 1: negative gap overlays the dot on the icon's bottom edge, so the
+  -- stack's total height equals iconSize and the icon stays vertically centered.
   local iconChildren = { children[1] }
   if C.showActiveIndicator then
     local fill = "#00000000"
@@ -293,7 +306,7 @@ local function makeTile(tile, showTitles, titleWidth)
   end
 
   local iconStack = ui.column({
-    gap = 1,
+    gap = -dotSize(),
     align = "center",
     justify = "center",
   }, iconChildren)
@@ -333,18 +346,21 @@ local function makeTile(tile, showTitles, titleWidth)
     })
   end
 
+  -- Fix 2: square tile with circular hover; always set fill so the reconciler
+  -- clears it on leave (nil fill may not be cleared by the reconciler).
+  local ts = tileSize()
+  local isHovered = hovered == key
+
   return ui.row({
     key = key,
-    gap = 4,
-    padding = 2,
-    radius = 6,
+    width = ts,
+    height = ts,
+    radius = ts / 2,
     align = "center",
     justify = "center",
     opacity = opacity,
-    fill = hovered == key and "on_surface/0.1" or nil,
-    onClick = function()
-      activateTile(tile)
-    end,
+    fill = isHovered and "on_surface/0.1" or "#00000000",
+    onClick = clickFn,
     onHover = "onTileHover",
     tooltip = tileTooltip(tile),
   }, rowChildren)
@@ -483,9 +499,12 @@ local function buildFlatTiles(model)
   end
 
   if C.showRunning then
+    -- Fix 4: collect non-pinned windows then sort by stable key so focus
+    -- changes never reorder tiles.
+    local nonPinned = {}
     for index, window in ipairs(model.windows) do
       if not used[index] then
-        table.insert(tiles, {
+        table.insert(nonPinned, {
           key = "win:" .. window.id,
           appId = window.app_id,
           windows = { window },
@@ -494,6 +513,15 @@ local function buildFlatTiles(model)
           active = window.active == true,
         })
       end
+    end
+    table.sort(nonPinned, function(a, b)
+      if a.appId ~= b.appId then
+        return a.appId < b.appId
+      end
+      return a.key < b.key
+    end)
+    for _, tile in ipairs(nonPinned) do
+      table.insert(tiles, tile)
     end
   end
 
@@ -644,18 +672,19 @@ local function makeWorkspaceContent(group)
 
   if C.groupSingleIconPerApp then
     for _, tile in ipairs(groupWindowsByApp(windows, "grp:" .. tostring(workspace.id))) do
-      table.insert(nodes, makeTile(tile, false, 0))
+      table.insert(nodes, makeTile(tile, false, 0, function() activateTile(tile) end))
     end
   else
     for _, window in ipairs(windows) do
-      table.insert(nodes, makeTile({
+      local tile = {
         key = "win:" .. window.id,
         appId = window.app_id,
         windows = { window },
         pinned = false,
         running = true,
         active = window.active == true,
-      }, false, 0))
+      }
+      table.insert(nodes, makeTile(tile, false, 0, function() activateTile(tile) end))
     end
   end
   return nodes
@@ -697,8 +726,6 @@ local function render()
     return
   end
   if snapshot.available ~= true then
-    -- With no snapshot there is nothing to draw; with an error, say so instead
-    -- of leaving an invisible widget the user cannot diagnose.
     local message = type(snapshot.error) == "string" and snapshot.error or ""
     if message == "" then
       barWidget.setVisible(false)
@@ -738,9 +765,58 @@ local function render()
     end
   end
 
+  local ts = tileSize()
   local children = {}
+  local pinIndex = 0
+
   for _, tile in ipairs(tiles) do
-    table.insert(children, makeTile(tile, showTitles, titleWidth))
+    if tile.pinned then
+      -- Fix 3: drag-to-reorder pinned tiles via dragSource + dropZone.
+      pinIndex = pinIndex + 1
+      -- Thin insertion zone before this pinned tile.
+      table.insert(children, ui.dropZone({
+        key = "dz:" .. tostring(pinIndex - 1),
+        accepts = { DRAG_TYPE },
+        value = tostring(pinIndex - 1),
+        onDrop = "onPinReorder",
+        width = 2,
+        height = ts,
+        expandOnDrag = true,
+        hitSlop = 20,
+      }))
+      -- The tile row without onClick; the dragSource handles click.
+      local tileRow = makeTile(tile, showTitles, titleWidth, nil)
+      table.insert(children, ui.dragSource({
+        key = "ds:" .. tile.key,
+        dragType = DRAG_TYPE,
+        payload = tostring(pinIndex),
+        previewAncestor = 1,
+        liftFromLayout = true,
+        grabCursor = false,
+        onClick = function()
+          activateTile(tile)
+        end,
+      }, { tileRow }))
+    else
+      table.insert(children, makeTile(tile, showTitles, titleWidth, function()
+        activateTile(tile)
+      end))
+    end
+  end
+
+  -- Trailing drop zone after the last pinned tile (or before the first if
+  -- there are pins at all).
+  if pinIndex > 0 then
+    table.insert(children, ui.dropZone({
+      key = "dz:" .. tostring(pinIndex),
+      accepts = { DRAG_TYPE },
+      value = tostring(pinIndex),
+      onDrop = "onPinReorder",
+      width = 2,
+      height = ts,
+      expandOnDrag = true,
+      hitSlop = 20,
+    }))
   end
 
   local container = isVertical and ui.column or ui.row
@@ -753,10 +829,46 @@ end
 function onTileHover(state, key)
   if state == "true" then
     hovered = key
-  elseif hovered == key then
-    hovered = nil
+  elseif state == "false" then
+    -- Fix 2: always clear on leave, regardless of which key.
+    if hovered == key then
+      hovered = nil
+    end
   end
   render()
+end
+
+-- Fix 3: reorder pins on drag-and-drop.
+function onPinReorder(payload, value)
+  local fromIdx = tonumber(payload)
+  local toIdx = tonumber(value)
+  if fromIdx == nil or toIdx == nil then
+    return
+  end
+  local pins = type(snapshot) == "table" and type(snapshot.pins) == "table" and snapshot.pins or C.configuredPins
+  if fromIdx < 1 or fromIdx > #pins then
+    return
+  end
+  if toIdx < 0 or toIdx > #pins then
+    return
+  end
+  local movedPin = pins[fromIdx]
+  -- Build new list without the moved pin.
+  local newPins = {}
+  for i = 1, #pins do
+    if i ~= fromIdx then
+      table.insert(newPins, pins[i])
+    end
+  end
+  -- Adjust insertion point: toIdx counts pins before the slot. After removing
+  -- fromIdx, if the source was at or before the target, shift down by one.
+  local insertAt = toIdx
+  if fromIdx <= toIdx then
+    insertAt = toIdx - 1
+  end
+  insertAt = math.max(0, math.min(insertAt, #newPins))
+  table.insert(newPins, insertAt + 1, movedPin)
+  sendEnvelope({ kind = "pins", pins = newPins })
 end
 
 function onRightClick()

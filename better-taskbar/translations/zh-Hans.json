@@ -1,0 +1,143 @@
+{
+  "error": {
+    "stream_closed": "Umbriel 连接已断开，正在重试。",
+    "stream_failed": "无法启动 Umbriel 事件流，正在重试。"
+  },
+  "menu": {
+    "close": "关闭",
+    "empty": "未选中窗口。",
+    "launch": "启动",
+    "minimize": "最小化",
+    "more": "还有 {count} 个",
+    "pin": "固定到任务栏",
+    "unpin": "从任务栏取消固定"
+  },
+  "notify": {
+    "action_failed": "Umbriel 拒绝了 {action}",
+    "launch_failed": "无法启动此应用"
+  },
+  "settings": {
+    "active_indicator_color": {
+      "description": "活动窗口图标下方圆点的颜色。",
+      "label": "活动指示器颜色"
+    },
+    "active_opacity": {
+      "description": "活动窗口图标的不透明度。",
+      "label": "活动不透明度"
+    },
+    "empty_color": {
+      "description": "空工作区标签的颜色。",
+      "label": "空工作区颜色"
+    },
+    "focused_color": {
+      "description": "聚焦工作区标签的颜色。",
+      "label": "聚焦工作区颜色"
+    },
+    "group_by_workspace": {
+      "description": "当 Umbriel 报告窗口工作区时，将图标按工作区分组显示。",
+      "label": "按工作区分组"
+    },
+    "group_single_icon_per_app": {
+      "description": "在工作区分组内为每个应用显示一个图标。",
+      "label": "分组内每应用一图标"
+    },
+    "hidden_workspaces": {
+      "description": "要隐藏的工作区名称或 ID（活动时除外）。",
+      "label": "隐藏工作区"
+    },
+    "hide_empty_workspaces": {
+      "description": "不为无窗口的工作区绘制分组。",
+      "label": "隐藏空工作区"
+    },
+    "icon_scale": {
+      "description": "相对于默认大小缩放任务栏图标。",
+      "label": "图标缩放"
+    },
+    "inactive_opacity": {
+      "description": "非活动窗口图标的不透明度。",
+      "label": "非活动不透明度"
+    },
+    "item_spacing": {
+      "description": "平铺模式下任务栏项之间的像素间距。",
+      "label": "项间距"
+    },
+    "minimal": {
+      "description": "将工作区标签绘制为纯文本而非彩色圆盘。",
+      "label": "极简工作区标签"
+    },
+    "occupied_color": {
+      "description": "已占用工作区标签的颜色。",
+      "label": "已占用工作区颜色"
+    },
+    "only_active_workspace": {
+      "description": "仅显示每个相关输出上活动工作区的窗口。",
+      "label": "仅活动工作区"
+    },
+    "pinned": {
+      "description": "未运行时仍保留在任务栏上的桌面入口 ID。",
+      "label": "固定应用"
+    },
+    "pinned_opacity": {
+      "description": "未运行的固定应用的不透明度。",
+      "label": "固定应用不透明度"
+    },
+    "show_active_indicator": {
+      "description": "在活动窗口图标下方显示一个小圆点。",
+      "label": "显示活动指示器"
+    },
+    "show_all_outputs": {
+      "description": "包含所有显示器的窗口，而不仅是此栏所在输出。",
+      "label": "显示所有显示器"
+    },
+    "show_running": {
+      "description": "显示未固定的窗口。关闭后仅显示固定项。",
+      "label": "显示运行窗口"
+    },
+    "show_window_title": {
+      "description": "在水平栏上每个图标旁显示窗口标题。",
+      "label": "显示窗口标题"
+    },
+    "show_workspace_label": {
+      "description": "在每个工作区分组上显示标签。",
+      "label": "显示工作区标签"
+    },
+    "taskbar_max_width": {
+      "description": "平铺模式下标题的总宽度预算。",
+      "label": "任务栏最大宽度"
+    },
+    "urgent_color": {
+      "description": "紧急工作区标签的颜色。",
+      "label": "紧急工作区颜色"
+    },
+    "window_title_max_width": {
+      "description": "每个窗口标题的最大像素宽度。",
+      "label": "窗口标题宽度"
+    },
+    "workspace_group_active_border_color": {
+      "description": "活动工作区分组的边框颜色。",
+      "label": "活动分组边框颜色"
+    },
+    "workspace_group_capsule": {
+      "description": "为每个工作区分组绘制背景和边框。",
+      "label": "工作区分组胶囊"
+    },
+    "workspace_group_content": {
+      "count": "窗口计数",
+      "description": "每个工作区分组显示的窗口内容形式。",
+      "dots": "每窗口一个圆点",
+      "icons": "应用图标",
+      "label": "工作区分组内容"
+    },
+    "workspace_group_inactive_border_color": {
+      "description": "非活动工作区分组的边框颜色。",
+      "label": "非活动分组边框颜色"
+    }
+  },
+  "tooltip": {
+    "minimized": "{count} 个已最小化",
+    "pinned_not_running": "未运行 - 点击启动",
+    "window": "窗口",
+    "windows": "{count} 个窗口",
+    "workspace_windows": "{count} 个窗口"
+  }
+}
