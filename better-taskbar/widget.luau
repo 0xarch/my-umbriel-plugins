@@ -60,6 +60,7 @@ local function readConfig()
     showActiveIndicator = bool("show_active_indicator", true),
     activeIndicatorColor = text("active_indicator_color", "primary"),
     windowIndicatorColor = text("window_indicator_color", "on_surface_variant"),
+    windowIndicatorOpacity = number("window_indicator_opacity", 1.0),
     middleClick = text("middle_click", "close"),
     activeOpacity = number("active_opacity", 1.0),
     inactiveOpacity = number("inactive_opacity", 1.0),
@@ -229,13 +230,21 @@ local function activateTile(tile)
     return
   end
   -- Multiple windows: switch straight to the next window, skipping the
-  -- minimize attempt (focusing a minimized window restores it).
+  -- minimize attempt (focusing a minimized window restores it). If the
+  -- cursor lands on the already-focused window, step past it so every
+  -- click visibly switches.
+  local count = #tile.windows
   local cursor = cycleCursor[tile.key]
-  if type(cursor) ~= "number" or cursor < 1 or cursor > #tile.windows then
+  if type(cursor) ~= "number" or cursor < 1 or cursor > count then
     cursor = 1
   end
-  cycleCursor[tile.key] = (cursor % #tile.windows) + 1
-  activateWindow(tile.windows[cursor], false)
+  local target = tile.windows[cursor]
+  if target.active == true then
+    cursor = (cursor % count) + 1
+    target = tile.windows[cursor]
+  end
+  cycleCursor[tile.key] = (cursor % count) + 1
+  activateWindow(target, false)
 end
 
 local function switchWorkspace(workspace)
@@ -257,6 +266,31 @@ local function makeDot(fill, size)
     radius = size / 2,
     fill = fill,
   })
+end
+
+-- Apply an opacity to a UiColor: palette roles take the "role/alpha" form,
+-- hex colors gain an alpha byte ("#rrggbb" -> "#rrggbbaa").
+local function withAlpha(color, opacity)
+  if type(color) ~= "string" or color == "" or opacity == nil or opacity >= 0.999 then
+    return color
+  end
+  local alpha = math.floor(opacity * 255 + 0.5)
+  if alpha >= 255 then
+    return color
+  end
+  if string.sub(color, 1, 1) == "#" then
+    local hex = string.sub(color, 2)
+    if #hex == 3 or #hex == 6 then
+      return "#" .. hex .. string.format("%02x", alpha)
+    end
+    if #hex == 8 then
+      return "#" .. string.sub(hex, 1, 6) .. string.format("%02x", alpha)
+    end
+    return color
+  end
+  local slash = string.find(color, "/", 1, true)
+  local base = slash ~= nil and string.sub(color, 1, slash - 1) or color
+  return string.format("%s/%.2f", base, opacity)
 end
 
 local function makeTile(tile, showTitles, titleWidth)
@@ -285,7 +319,7 @@ local function makeTile(tile, showTitles, titleWidth)
   local indicatorChildren = {}
   local winCount = #tile.windows
   if winCount == 1 then
-    local fill = C.windowIndicatorColor
+    local fill = withAlpha(C.windowIndicatorColor, C.windowIndicatorOpacity)
     if tile.windows[1].active == true and C.showActiveIndicator then
       fill = C.activeIndicatorColor
     end
@@ -293,7 +327,7 @@ local function makeTile(tile, showTitles, titleWidth)
   elseif winCount > 1 then
     local limit = math.min(winCount, 4)
     for i = 1, limit do
-      local fill = C.windowIndicatorColor
+      local fill = withAlpha(C.windowIndicatorColor, C.windowIndicatorOpacity)
       if tile.windows[i].active == true and C.showActiveIndicator then
         fill = C.activeIndicatorColor
       end
@@ -303,7 +337,7 @@ local function makeTile(tile, showTitles, titleWidth)
       table.insert(indicatorChildren, ui.label({
         text = "+" .. tostring(winCount - limit),
         fontSize = 8,
-        color = C.windowIndicatorColor,
+        color = withAlpha(C.windowIndicatorColor, C.windowIndicatorOpacity),
       }))
     end
   end

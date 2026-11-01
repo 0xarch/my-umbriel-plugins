@@ -37,6 +37,10 @@
       "description": "Color of the dots marking each window of a merged app tile.",
       "label": "Window indicator color"
     },
+    "window_indicator_opacity": {
+      "description": "Opacity of the window indicator dots. The active dot keeps full strength.",
+      "label": "Window indicator opacity"
+    },
     "empty_color": {
       "description": "Color of an empty workspace label.",
       "label": "Empty workspace color"
