@@ -149,11 +149,18 @@ function onClose()
   target = nil
 end
 
+-- The widget publishes the tile and toggles the panel in two calls; the state
+-- copy can land after onOpen, so follow the key rather than trusting one read.
+noctalia.state.watch(MENU_KEY, function(value)
+  if type(value) == "table" then
+    target = value
+    render()
+  end
+end)
+
 noctalia.state.watch(STATE_KEY, function(value)
   if type(value) == "table" then
     snapshot = value
-    if target ~= nil then
-      render()
-    end
+    render()
   end
 end)

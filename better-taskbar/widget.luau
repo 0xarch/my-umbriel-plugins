@@ -692,8 +692,22 @@ end
 local function render()
   hoverTargets = {}
 
-  if type(snapshot) ~= "table" or snapshot.available ~= true then
+  if type(snapshot) ~= "table" then
     barWidget.setVisible(false)
+    return
+  end
+  if snapshot.available ~= true then
+    -- With no snapshot there is nothing to draw; with an error, say so instead
+    -- of leaving an invisible widget the user cannot diagnose.
+    local message = type(snapshot.error) == "string" and snapshot.error or ""
+    if message == "" then
+      barWidget.setVisible(false)
+      return
+    end
+    barWidget.setVisible(true)
+    barWidget.render(ui.row({ gap = 4, padding = 2, align = "center", tooltip = message }, {
+      ui.glyph({ name = "alert-triangle", size = 14, color = "error" }),
+    }))
     return
   end
   barWidget.setVisible(true)

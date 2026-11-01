@@ -26,7 +26,6 @@ local windows = {}
 local workspaces = {}
 local errorText = nil
 local pins = {}
-local pinsLoaded = false
 
 local function socketPath()
   local explicit = noctalia.getenv("UMBRIEL_SOCKET")
@@ -73,10 +72,6 @@ local function savePins()
 end
 
 local function loadPins()
-  if pinsLoaded then
-    return
-  end
-  pinsLoaded = true
   local path = pinsPath()
   if path ~= nil and noctalia.fileExists(path) then
     local raw = noctalia.readFile(path)
@@ -88,11 +83,9 @@ local function loadPins()
       end
     end
   end
-  -- First run (or an unreadable file) seeds from the plugin setting.
+  -- No saved list yet: follow the plugin setting until the first pin action
+  -- writes one. Saving here would freeze the setting at its first value.
   pins = copyStringList(noctalia.getConfig("pinned"))
-  if #pins > 0 then
-    savePins()
-  end
 end
 
 local function publish()
