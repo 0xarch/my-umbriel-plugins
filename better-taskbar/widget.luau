@@ -99,21 +99,21 @@ local function tileSize()
   return math.ceil(iconSize() + 4)
 end
 
--- Column gap that places the indicator dot row at the configured vertical
--- position. The position is relative: -1.25 = above the top edge, 0 = center,
--- +1.0 = bottom edge (default); the pixel offset scales with the tile size,
--- which follows iconSize. A counterweight of exactly dotSize keeps the icon
--- centered for any gap, so only the dots move.
-local function indicatorGap(ts)
+-- Indicator placement: target = vertical center of the dot row inside the
+-- tile. Returns (topSpacer, columnGap) solving both constraints exactly:
+-- iconCenter = ts/2 and dotRowCenter = target. The relative position scales
+-- with the tile size, which follows iconSize. Works for any target because
+-- the column gets an explicit height and start-justification - no reliance
+-- on the flex centering of overflowing content.
+local function indicatorLayout(ts)
   local p = C.indicatorPosition
   if type(p) ~= "number" then
     p = 1.0
   end
   p = math.max(-1.25, math.min(1.25, p))
-  local half = ts / 2 - dotSize() / 2 - 1 -- keep 1px inside the tile edge
-  local center = ts / 2 + p * half
-  local stackHeight = 2 * center + dotSize() - ts
-  return (stackHeight - iconSize() - 2 * dotSize()) / 2
+  local target = ts / 2 + p * (ts / 2 - dotSize() / 2 - 1)
+  local gap = target - dotSize() / 2 - ts / 2 - iconSize() / 2
+  return ts - target + dotSize() / 2, gap
 end
 
 local function lower(value)
@@ -361,20 +361,27 @@ local function makeTile(tile, showTitles, titleWidth)
     end
   end
 
-  -- Stack: top spacer + icon + dot row. The negative gap overlays the dots on
-  -- the icon's bottom and hangs them ~4px lower; the top spacer (one dot tall)
-  -- balances that overhang so the icon stays vertically centered in the tile
-  -- and the dot row sits 1px above the tile's bottom edge.
-  local stackChildren = { children[1] }
+  -- Stack: explicit tile-height column, start-justified. The top spacer and
+  -- gap are solved so the icon is exactly centered while the dot row lands
+  -- on the configured position; dots may visually overflow the tile edge.
+  local stackSpacer, stackGap = (ts - iconSize()) / 2, 0
   if #indicatorChildren > 0 then
-    table.insert(stackChildren, 1, ui.box({ width = 1, height = dotSize(), fill = "#00000000" }))
+    stackSpacer, stackGap = indicatorLayout(ts)
+  end
+
+  local stackChildren = {
+    ui.box({ width = 1, height = stackSpacer, fill = "#00000000" }),
+    children[1],
+  }
+  if #indicatorChildren > 0 then
     table.insert(stackChildren, ui.row({ gap = 1, align = "center" }, indicatorChildren))
   end
 
   local iconStack = ui.column({
-    gap = indicatorGap(ts),
+    height = ts,
+    gap = stackGap,
     align = "center",
-    justify = "center",
+    justify = "start",
   }, stackChildren)
 
   local rowChildren = { iconStack }
