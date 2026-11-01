@@ -100,16 +100,16 @@ local function tileSize()
 end
 
 -- Column gap that places the indicator dot row at the configured vertical
--- position. The position is relative: -1.0 = top edge, 0 = center, +1.0 =
--- bottom edge (default); the pixel offset scales with the tile size, which
--- follows iconSize. A counterweight of exactly dotSize keeps the icon
+-- position. The position is relative: -1.25 = above the top edge, 0 = center,
+-- +1.0 = bottom edge (default); the pixel offset scales with the tile size,
+-- which follows iconSize. A counterweight of exactly dotSize keeps the icon
 -- centered for any gap, so only the dots move.
 local function indicatorGap(ts)
   local p = C.indicatorPosition
   if type(p) ~= "number" then
     p = 1.0
   end
-  p = math.max(-1.0, math.min(1.0, p))
+  p = math.max(-1.25, math.min(1.25, p))
   local half = ts / 2 - dotSize() / 2 - 1 -- keep 1px inside the tile edge
   local center = ts / 2 + p * half
   local stackHeight = 2 * center + dotSize() - ts

@@ -42,7 +42,7 @@
       "label": "Window indicator opacity"
     },
     "indicator_position": {
-      "description": "Vertical position of the indicator dots: -1.0 hugs the top edge, 0 centers on the tile, 1.0 hugs the bottom edge. Scales with the icon size.",
+      "description": "Vertical position of the indicator dots: 0 centers on the tile, 1.0 (default) hugs the bottom edge. Range -1.25 to 1.25, scaling with the icon size.",
       "label": "Indicator vertical position"
     },
     "empty_color": {

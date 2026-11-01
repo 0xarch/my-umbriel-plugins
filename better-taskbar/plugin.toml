@@ -7,7 +7,7 @@
 
 id = "io.soloev/better-taskbar"
 name = "Better Taskbar"
-version = "0.5.0"
+version = "0.5.1"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"
@@ -123,8 +123,8 @@ hover_highlight = false
   label_key = "settings.indicator_position.label"
   description_key = "settings.indicator_position.description"
   default = 1.0
-  min = -1.0
-  max = 1.0
+  min = -1.25
+  max = 1.25
   step = 0.05
 
   [[widget.setting]]
