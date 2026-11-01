@@ -10,7 +10,9 @@
     "minimize": "最小化",
     "more": "还有 {count} 个",
     "pin": "固定到任务栏",
-    "unpin": "从任务栏取消固定"
+    "unpin": "从任务栏取消固定",
+    "move_left": "左移",
+    "move_right": "右移"
   },
   "notify": {
     "action_failed": "Umbriel 拒绝了 {action}",

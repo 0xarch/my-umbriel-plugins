@@ -181,6 +181,41 @@ local function togglePin(appId)
   setPins(nextPins)
 end
 
+local function movePin(appId, direction)
+  if type(appId) ~= "string" or appId == "" then
+    return
+  end
+  if direction ~= "left" and direction ~= "right" then
+    return
+  end
+  local lower = string.lower(appId)
+  local idx = 0
+  for i, pin in ipairs(pins) do
+    if string.lower(pin) == lower then
+      idx = i
+      break
+    end
+  end
+  if idx == 0 then
+    return
+  end
+  local targetIdx = direction == "left" and idx - 1 or idx + 1
+  if targetIdx < 1 or targetIdx > #pins then
+    return
+  end
+  local nextPins = {}
+  for i = 1, #pins do
+    if i == idx then
+      table.insert(nextPins, pins[targetIdx])
+    elseif i == targetIdx then
+      table.insert(nextPins, pins[idx])
+    else
+      table.insert(nextPins, pins[i])
+    end
+  end
+  setPins(nextPins)
+end
+
 noctalia.state.watch(REQUEST_KEY, function(value)
   if type(value) ~= "table" then
     return
@@ -192,6 +227,10 @@ noctalia.state.watch(REQUEST_KEY, function(value)
   end
   if value.kind == "toggle-pin" then
     togglePin(value.app_id)
+    return
+  end
+  if value.kind == "pin-move" then
+    movePin(value.app_id, value.direction)
     return
   end
   if type(value.request) == "table" and type(value.request.action) == "string" then

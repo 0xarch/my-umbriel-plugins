@@ -43,6 +43,13 @@ local function isPinned()
   return false
 end
 
+local function pinCount()
+  if snapshot == nil or type(snapshot.pins) ~= "table" then
+    return 0
+  end
+  return #snapshot.pins
+end
+
 local function render()
   if target == nil then
     panel.render(ui.column({ gap = 8 }, {
@@ -125,8 +132,11 @@ local function render()
   end
 
   table.insert(children, ui.separator({ spacing = 2 }))
+
+  -- Pin/unpin toggle.
+  local pinned = isPinned()
   table.insert(children, ui.button({
-    text = isPinned() and noctalia.tr("menu.unpin") or noctalia.tr("menu.pin"),
+    text = pinned and noctalia.tr("menu.unpin") or noctalia.tr("menu.pin"),
     glyph = "pin",
     contentAlign = "start",
     variant = "ghost",
@@ -135,6 +145,35 @@ local function render()
       panel.close()
     end,
   }))
+
+  -- Move left/right for pinned items (reorder without drag-and-drop).
+  if pinned and pinCount() > 1 then
+    local idx = target.pin_index or 0
+    if idx > 1 then
+      table.insert(children, ui.button({
+        text = noctalia.tr("menu.move_left"),
+        glyph = "chevron-left",
+        contentAlign = "start",
+        variant = "ghost",
+        onClick = function()
+          noctalia.state.set(REQUEST_KEY, { kind = "pin-move", app_id = target.app_id, direction = "left" })
+          panel.close()
+        end,
+      }))
+    end
+    if idx < pinCount() then
+      table.insert(children, ui.button({
+        text = noctalia.tr("menu.move_right"),
+        glyph = "chevron-right",
+        contentAlign = "start",
+        variant = "ghost",
+        onClick = function()
+          noctalia.state.set(REQUEST_KEY, { kind = "pin-move", app_id = target.app_id, direction = "right" })
+          panel.close()
+        end,
+      }))
+    end
+  end
 
   panel.render(ui.column({ gap = 6 }, children))
 end

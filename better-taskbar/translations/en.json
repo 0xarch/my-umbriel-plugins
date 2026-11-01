@@ -10,7 +10,9 @@
     "minimize": "Minimize",
     "more": "+{count} more",
     "pin": "Pin to taskbar",
-    "unpin": "Unpin from taskbar"
+    "unpin": "Unpin from taskbar",
+    "move_left": "Move left",
+    "move_right": "Move right"
   },
   "notify": {
     "action_failed": "Umbriel rejected {action}",
