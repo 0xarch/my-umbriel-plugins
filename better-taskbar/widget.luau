@@ -59,6 +59,8 @@ local function readConfig()
     pinnedOpacity = number("pinned_opacity", 0.5),
     showActiveIndicator = bool("show_active_indicator", true),
     activeIndicatorColor = text("active_indicator_color", "primary"),
+    windowIndicatorColor = text("window_indicator_color", "on_surface_variant"),
+    middleClick = text("middle_click", "close"),
     activeOpacity = number("active_opacity", 1.0),
     inactiveOpacity = number("inactive_opacity", 1.0),
     showWindowTitle = bool("show_window_title", false),
@@ -279,46 +281,46 @@ local function makeTile(tile, showTitles, titleWidth)
     }))
   end
 
-  -- Layout: icon on top, indicator row at bottom overlaying the icon edge.
-  -- The active dot pushes down 4px via a spacer. Window dots sit beside it.
+  -- Indicator dots: one per window. The focused window's dot uses the active
+  -- color, the rest the window indicator color. A lone window keeps a
+  -- transparent placeholder so the icon never shifts when focus moves.
   local indicatorChildren = {}
-  if C.showActiveIndicator then
-    local fill = "#00000000"
-    if tile.active then
-      fill = C.activeIndicatorColor
-    end
-    table.insert(indicatorChildren, makeDot(fill, dotSize()))
-  end
   local winCount = #tile.windows
-  if winCount > 1 then
+  if winCount == 1 then
+    if C.showActiveIndicator then
+      local active = tile.windows[1].active == true
+      table.insert(indicatorChildren, makeDot(active and C.activeIndicatorColor or "#00000000", dotSize()))
+    end
+  elseif winCount > 1 then
     local limit = math.min(winCount, 4)
     for i = 1, limit do
-      table.insert(indicatorChildren, makeDot("on_surface_variant", dotSize()))
+      local fill = C.windowIndicatorColor
+      if tile.windows[i].active == true and C.showActiveIndicator then
+        fill = C.activeIndicatorColor
+      end
+      table.insert(indicatorChildren, makeDot(fill, dotSize()))
     end
     if winCount > limit then
       table.insert(indicatorChildren, ui.label({
         text = "+" .. tostring(winCount - limit),
         fontSize = 8,
-        color = "on_surface_variant",
+        color = C.windowIndicatorColor,
       }))
     end
   end
 
-  local indicatorRow = nil
-  if #indicatorChildren > 0 then
-    indicatorRow = ui.row({ gap = 1, align = "center" }, indicatorChildren)
-  end
-
-  -- Stack: icon, then 4px spacer, then indicator dots.
-  -- Negative gap on the spacer overlaps dots back onto the icon bottom.
+  -- Stack: top spacer + icon + dot row. The negative gap overlays the dots on
+  -- the icon's bottom and hangs them ~4px lower; the top spacer (one dot tall)
+  -- balances that overhang so the icon stays vertically centered in the tile
+  -- and the dot row sits 1px above the tile's bottom edge.
   local stackChildren = { children[1] }
-  if indicatorRow ~= nil then
-    table.insert(stackChildren, ui.box({ width = 1, height = 4, fill = "#00000000" }))
-    table.insert(stackChildren, indicatorRow)
+  if #indicatorChildren > 0 then
+    table.insert(stackChildren, 1, ui.box({ width = 1, height = dotSize(), fill = "#00000000" }))
+    table.insert(stackChildren, ui.row({ gap = 1, align = "center" }, indicatorChildren))
   end
 
   local iconStack = ui.column({
-    gap = -dotSize(),
+    gap = 1 - dotSize(),
     align = "center",
     justify = "center",
   }, stackChildren)
@@ -834,6 +836,14 @@ end
 function onMiddleClick()
   local target = hovered ~= nil and hoverTargets[hovered] or nil
   if target == nil then
+    return
+  end
+  -- Configurable middle-click action: launch a new instance or close (default,
+  -- matching the built-in taskbar).
+  if C.middleClick == "launch" then
+    if type(target.app_id) == "string" and target.app_id ~= "" then
+      launchApp(target.app_id)
+    end
     return
   end
   local window = nil

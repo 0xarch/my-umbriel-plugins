@@ -27,6 +27,16 @@
       "description": "活动窗口图标的不透明度。",
       "label": "活动不透明度"
     },
+    "middle_click": {
+      "close": "关闭窗口",
+      "description": "中键点击任务栏项时执行的动作。",
+      "label": "中键动作",
+      "launch": "启动新实例"
+    },
+    "window_indicator_color": {
+      "description": "合并应用图块上标记各窗口的圆点颜色。",
+      "label": "窗口指示器颜色"
+    },
     "empty_color": {
       "description": "空工作区标签的颜色。",
       "label": "空工作区颜色"

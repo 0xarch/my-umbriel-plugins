@@ -27,6 +27,16 @@
       "description": "Opacity of the icon for the active window.",
       "label": "Active opacity"
     },
+    "middle_click": {
+      "close": "Close window",
+      "description": "What a middle click on a taskbar item does.",
+      "label": "Middle click action",
+      "launch": "Launch new instance"
+    },
+    "window_indicator_color": {
+      "description": "Color of the dots marking each window of a merged app tile.",
+      "label": "Window indicator color"
+    },
     "empty_color": {
       "description": "Color of an empty workspace label.",
       "label": "Empty workspace color"

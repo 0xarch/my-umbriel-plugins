@@ -7,7 +7,7 @@
 
 id = "io.soloev/better-taskbar"
 name = "Better Taskbar"
-version = "0.2.0"
+version = "0.3.0"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"
@@ -99,6 +99,24 @@ hover_highlight = false
   label_key = "settings.active_indicator_color.label"
   description_key = "settings.active_indicator_color.description"
   default = "primary"
+
+  [[widget.setting]]
+  key = "window_indicator_color"
+  type = "color"
+  label_key = "settings.window_indicator_color.label"
+  description_key = "settings.window_indicator_color.description"
+  default = "on_surface_variant"
+
+  [[widget.setting]]
+  key = "middle_click"
+  type = "select"
+  label_key = "settings.middle_click.label"
+  description_key = "settings.middle_click.description"
+  default = "close"
+  options = [
+    { value = "close", label_key = "settings.middle_click.close" },
+    { value = "launch", label_key = "settings.middle_click.launch" },
+  ]
 
   [[widget.setting]]
   key = "active_opacity"
