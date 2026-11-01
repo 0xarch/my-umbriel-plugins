@@ -90,9 +90,9 @@ local function dotSize()
   return math.max(4, math.floor(16 * 0.32 + 0.5))
 end
 
--- Tile diameter: icon + 8px padding (4px each side), leaving gap from bar edge.
+-- Tile diameter: icon + 4px padding (2px each side), leaving gap from bar edge.
 local function tileSize()
-  return math.ceil(iconSize() + 8)
+  return math.ceil(iconSize() + 4)
 end
 
 local function lower(value)
@@ -279,22 +279,49 @@ local function makeTile(tile, showTitles, titleWidth)
     }))
   end
 
-  -- Negative gap overlays the dot on the icon's bottom edge, so the
-  -- stack's total height equals iconSize and the icon stays centered.
-  local iconChildren = { children[1] }
+  -- Layout: icon on top, indicator row at bottom overlaying the icon edge.
+  -- The active dot pushes down 4px via a spacer. Window dots sit beside it.
+  local indicatorChildren = {}
   if C.showActiveIndicator then
     local fill = "#00000000"
     if tile.active then
       fill = C.activeIndicatorColor
     end
-    table.insert(iconChildren, makeDot(fill, dotSize()))
+    table.insert(indicatorChildren, makeDot(fill, dotSize()))
+  end
+  local winCount = #tile.windows
+  if winCount > 1 then
+    local limit = math.min(winCount, 4)
+    for i = 1, limit do
+      table.insert(indicatorChildren, makeDot("on_surface_variant", dotSize()))
+    end
+    if winCount > limit then
+      table.insert(indicatorChildren, ui.label({
+        text = "+" .. tostring(winCount - limit),
+        fontSize = 8,
+        color = "on_surface_variant",
+      }))
+    end
+  end
+
+  local indicatorRow = nil
+  if #indicatorChildren > 0 then
+    indicatorRow = ui.row({ gap = 1, align = "center" }, indicatorChildren)
+  end
+
+  -- Stack: icon, then 4px spacer, then indicator dots.
+  -- Negative gap on the spacer overlaps dots back onto the icon bottom.
+  local stackChildren = { children[1] }
+  if indicatorRow ~= nil then
+    table.insert(stackChildren, ui.box({ width = 1, height = 4, fill = "#00000000" }))
+    table.insert(stackChildren, indicatorRow)
   end
 
   local iconStack = ui.column({
     gap = -dotSize(),
     align = "center",
     justify = "center",
-  }, iconChildren)
+  }, stackChildren)
 
   local rowChildren = { iconStack }
   if showTitles then
@@ -488,29 +515,37 @@ local function buildFlatTiles(model)
   end
 
   if C.showRunning then
-    -- Sort by stable key so focus changes never reorder tiles.
-    local nonPinned = {}
+    -- Group non-pinned windows by app_id for merged tiles, then sort
+    -- by stable key so focus changes never reorder tiles.
+    local byApp = {}
+    local appOrder = {}
     for index, window in ipairs(model.windows) do
       if not used[index] then
-        table.insert(nonPinned, {
-          key = "win:" .. window.id,
-          appId = window.app_id,
-          windows = { window },
-          pinned = false,
-          running = true,
-          active = window.active == true,
-          pinIndex = 0,
-        })
+        local appKey = lower(window.app_id)
+        if appKey == "" then
+          appKey = window.id
+        end
+        if byApp[appKey] == nil then
+          byApp[appKey] = {
+            key = "app:" .. appKey,
+            appId = window.app_id,
+            windows = {},
+            pinned = false,
+            running = true,
+            active = false,
+            pinIndex = 0,
+          }
+          table.insert(appOrder, appKey)
+        end
+        table.insert(byApp[appKey].windows, window)
+        if window.active == true then
+          byApp[appKey].active = true
+        end
       end
     end
-    table.sort(nonPinned, function(a, b)
-      if a.appId ~= b.appId then
-        return a.appId < b.appId
-      end
-      return a.key < b.key
-    end)
-    for _, tile in ipairs(nonPinned) do
-      table.insert(tiles, tile)
+    table.sort(appOrder)
+    for _, appKey in ipairs(appOrder) do
+      table.insert(tiles, byApp[appKey])
     end
   end
 
