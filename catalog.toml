@@ -1,0 +1,15 @@
+# Local plugin source for Noctalia.
+# Served over HTTP by darkhttpd on port 20442; also usable as a path source.
+# Keep one [[plugin]] row per plugin subdirectory.
+
+[[plugin]]
+id = "io.soloev/better-taskbar"
+name = "Better Taskbar"
+version = "0.1.0"
+author = "io.soloev"
+license = "MIT"
+icon = "layout-bottombar"
+description = "Pinned and running windows on the bar, with workspace groups and a window menu."
+plugin_api = 46
+tags = ["umbriel", "bar", "panel", "utility"]
+dependencies = ["umbriel"]

@@ -1,0 +1,143 @@
+{
+  "error": {
+    "stream_closed": "Umbriel connection closed; retrying.",
+    "stream_failed": "Could not start the Umbriel event stream; retrying."
+  },
+  "menu": {
+    "close": "Close",
+    "empty": "No window selected.",
+    "launch": "Launch",
+    "minimize": "Minimize",
+    "more": "+{count} more",
+    "pin": "Pin to taskbar",
+    "unpin": "Unpin from taskbar"
+  },
+  "notify": {
+    "action_failed": "Umbriel rejected {action}",
+    "launch_failed": "Could not launch this app"
+  },
+  "settings": {
+    "active_indicator_color": {
+      "description": "Color of the dot under the active window.",
+      "label": "Active indicator color"
+    },
+    "active_opacity": {
+      "description": "Opacity of the icon for the active window.",
+      "label": "Active opacity"
+    },
+    "empty_color": {
+      "description": "Color of an empty workspace label.",
+      "label": "Empty workspace color"
+    },
+    "focused_color": {
+      "description": "Color of the focused workspace label.",
+      "label": "Focused workspace color"
+    },
+    "group_by_workspace": {
+      "description": "Group icons into workspace capsules when Umbriel reports window workspaces.",
+      "label": "Group by workspace"
+    },
+    "group_single_icon_per_app": {
+      "description": "Show one icon per app inside a workspace capsule.",
+      "label": "One icon per app in groups"
+    },
+    "hidden_workspaces": {
+      "description": "Workspace names or IDs to leave out unless they are active.",
+      "label": "Hidden workspaces"
+    },
+    "hide_empty_workspaces": {
+      "description": "Do not draw capsules for workspaces with no windows.",
+      "label": "Hide empty workspaces"
+    },
+    "icon_scale": {
+      "description": "Scale taskbar icons relative to their default size.",
+      "label": "Icon scale"
+    },
+    "inactive_opacity": {
+      "description": "Opacity of icons for inactive windows.",
+      "label": "Inactive opacity"
+    },
+    "item_spacing": {
+      "description": "Space between taskbar items in pixels on the flat strip.",
+      "label": "Item spacing"
+    },
+    "minimal": {
+      "description": "Draw workspace labels as plain text instead of colored discs.",
+      "label": "Minimal workspace labels"
+    },
+    "occupied_color": {
+      "description": "Color of an occupied workspace label.",
+      "label": "Occupied workspace color"
+    },
+    "only_active_workspace": {
+      "description": "Show only windows on the active workspace of each relevant output.",
+      "label": "Only active workspace"
+    },
+    "pinned": {
+      "description": "Desktop entry IDs to keep on the taskbar when they are not running.",
+      "label": "Pinned apps"
+    },
+    "pinned_opacity": {
+      "description": "Opacity of pinned apps that are not running.",
+      "label": "Pinned app opacity"
+    },
+    "show_active_indicator": {
+      "description": "Show a small dot under the active window icon.",
+      "label": "Show active indicator"
+    },
+    "show_all_outputs": {
+      "description": "Include windows from every monitor, not just this bar's output.",
+      "label": "Show all monitors"
+    },
+    "show_running": {
+      "description": "Show windows that are not pinned. Turn off for a pinned-only strip.",
+      "label": "Show running windows"
+    },
+    "show_window_title": {
+      "description": "Show each window title next to its icon on horizontal bars.",
+      "label": "Show window titles"
+    },
+    "show_workspace_label": {
+      "description": "Show a label on every workspace capsule.",
+      "label": "Show workspace labels"
+    },
+    "taskbar_max_width": {
+      "description": "Total width budget for titles on the flat strip.",
+      "label": "Taskbar maximum width"
+    },
+    "urgent_color": {
+      "description": "Color of an urgent workspace label.",
+      "label": "Urgent workspace color"
+    },
+    "window_title_max_width": {
+      "description": "Maximum width of each window title in pixels.",
+      "label": "Window title width"
+    },
+    "workspace_group_active_border_color": {
+      "description": "Border color of the active workspace capsule.",
+      "label": "Active group border color"
+    },
+    "workspace_group_capsule": {
+      "description": "Draw a background and border around each workspace group.",
+      "label": "Workspace group capsule"
+    },
+    "workspace_group_content": {
+      "count": "Window count",
+      "description": "What each workspace capsule shows for its windows.",
+      "dots": "One dot per window",
+      "icons": "App icons",
+      "label": "Workspace group content"
+    },
+    "workspace_group_inactive_border_color": {
+      "description": "Border color of inactive workspace capsules.",
+      "label": "Inactive group border color"
+    }
+  },
+  "tooltip": {
+    "minimized": "{count} minimized",
+    "pinned_not_running": "Not running - click to launch",
+    "window": "Window",
+    "windows": "{count} windows",
+    "workspace_windows": "{count} windows"
+  }
+}

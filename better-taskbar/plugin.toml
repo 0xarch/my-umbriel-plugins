@@ -1,0 +1,262 @@
+# Better Taskbar - the built-in taskbar's behaviour as a standalone plugin.
+#
+# The bar widget draws pinned and running windows from Umbriel's IPC window and
+# workspace streams. A headless service owns the single event stream, the pin
+# list, and every compositor action, so the widget and its right-click menu stay
+# thin clients. Bar and panel placement live in the user's Noctalia config.
+
+id = "io.soloev/better-taskbar"
+name = "Better Taskbar"
+version = "0.1.0"
+plugin_api = 46
+author = "io.soloev"
+license = "MIT"
+dependencies = ["umbriel"]
+tags = ["umbriel", "bar", "panel", "utility"]
+icon = "layout-bottombar"
+description = "Pinned and running windows on the bar, with workspace groups and a window menu."
+
+# Shared by every entry: the pin list is one list per plugin, not per bar.
+[[setting]]
+key = "pinned"
+type = "string_list"
+label_key = "settings.pinned.label"
+description_key = "settings.pinned.description"
+default = []
+
+[[widget]]
+id = "taskbar"
+entry = "widget.luau"
+hover_highlight = false
+
+  [widget.actions]
+  middle = "none"
+
+  [[widget.setting]]
+  key = "show_all_outputs"
+  type = "bool"
+  label_key = "settings.show_all_outputs.label"
+  description_key = "settings.show_all_outputs.description"
+  default = false
+
+  [[widget.setting]]
+  key = "only_active_workspace"
+  type = "bool"
+  label_key = "settings.only_active_workspace.label"
+  description_key = "settings.only_active_workspace.description"
+  default = false
+
+  [[widget.setting]]
+  key = "show_running"
+  type = "bool"
+  label_key = "settings.show_running.label"
+  description_key = "settings.show_running.description"
+  default = true
+
+  [[widget.setting]]
+  key = "icon_scale"
+  type = "double"
+  label_key = "settings.icon_scale.label"
+  description_key = "settings.icon_scale.description"
+  default = 1.0
+  min = 0.1
+  max = 2.0
+  step = 0.05
+
+  [[widget.setting]]
+  key = "item_spacing"
+  type = "int"
+  label_key = "settings.item_spacing.label"
+  description_key = "settings.item_spacing.description"
+  default = 4
+  min = 0
+  max = 48
+  step = 1
+
+  [[widget.setting]]
+  key = "pinned_opacity"
+  type = "double"
+  label_key = "settings.pinned_opacity.label"
+  description_key = "settings.pinned_opacity.description"
+  default = 0.5
+  min = 0.0
+  max = 1.0
+  step = 0.01
+
+  [[widget.setting]]
+  key = "show_active_indicator"
+  type = "bool"
+  label_key = "settings.show_active_indicator.label"
+  description_key = "settings.show_active_indicator.description"
+  default = true
+
+  [[widget.setting]]
+  key = "active_indicator_color"
+  type = "color"
+  label_key = "settings.active_indicator_color.label"
+  description_key = "settings.active_indicator_color.description"
+  default = "primary"
+
+  [[widget.setting]]
+  key = "active_opacity"
+  type = "double"
+  label_key = "settings.active_opacity.label"
+  description_key = "settings.active_opacity.description"
+  default = 1.0
+  min = 0.1
+  max = 1.0
+  step = 0.01
+
+  [[widget.setting]]
+  key = "inactive_opacity"
+  type = "double"
+  label_key = "settings.inactive_opacity.label"
+  description_key = "settings.inactive_opacity.description"
+  default = 1.0
+  min = 0.1
+  max = 1.0
+  step = 0.01
+
+  [[widget.setting]]
+  key = "show_window_title"
+  type = "bool"
+  label_key = "settings.show_window_title.label"
+  description_key = "settings.show_window_title.description"
+  default = false
+
+  [[widget.setting]]
+  key = "window_title_max_width"
+  type = "int"
+  label_key = "settings.window_title_max_width.label"
+  description_key = "settings.window_title_max_width.description"
+  default = 100
+  min = 10
+  max = 200
+  step = 1
+
+  [[widget.setting]]
+  key = "taskbar_max_width"
+  type = "int"
+  label_key = "settings.taskbar_max_width.label"
+  description_key = "settings.taskbar_max_width.description"
+  default = 8192
+  min = 10
+  max = 8192
+  step = 1
+
+  [[widget.setting]]
+  key = "group_by_workspace"
+  type = "bool"
+  label_key = "settings.group_by_workspace.label"
+  description_key = "settings.group_by_workspace.description"
+  default = false
+
+  [[widget.setting]]
+  key = "hidden_workspaces"
+  type = "string_list"
+  label_key = "settings.hidden_workspaces.label"
+  description_key = "settings.hidden_workspaces.description"
+  default = []
+
+  [[widget.setting]]
+  key = "hide_empty_workspaces"
+  type = "bool"
+  label_key = "settings.hide_empty_workspaces.label"
+  description_key = "settings.hide_empty_workspaces.description"
+  default = false
+
+  [[widget.setting]]
+  key = "group_single_icon_per_app"
+  type = "bool"
+  label_key = "settings.group_single_icon_per_app.label"
+  description_key = "settings.group_single_icon_per_app.description"
+  default = false
+
+  [[widget.setting]]
+  key = "workspace_group_content"
+  type = "select"
+  label_key = "settings.workspace_group_content.label"
+  description_key = "settings.workspace_group_content.description"
+  default = "icons"
+  options = [
+    { value = "icons", label_key = "settings.workspace_group_content.icons" },
+    { value = "count", label_key = "settings.workspace_group_content.count" },
+    { value = "dots", label_key = "settings.workspace_group_content.dots" },
+  ]
+
+  [[widget.setting]]
+  key = "workspace_group_capsule"
+  type = "bool"
+  label_key = "settings.workspace_group_capsule.label"
+  description_key = "settings.workspace_group_capsule.description"
+  default = true
+
+  [[widget.setting]]
+  key = "workspace_group_active_border_color"
+  type = "color"
+  label_key = "settings.workspace_group_active_border_color.label"
+  description_key = "settings.workspace_group_active_border_color.description"
+  default = "primary"
+
+  [[widget.setting]]
+  key = "workspace_group_inactive_border_color"
+  type = "color"
+  label_key = "settings.workspace_group_inactive_border_color.label"
+  description_key = "settings.workspace_group_inactive_border_color.description"
+  default = "outline_variant"
+
+  [[widget.setting]]
+  key = "show_workspace_label"
+  type = "bool"
+  label_key = "settings.show_workspace_label.label"
+  description_key = "settings.show_workspace_label.description"
+  default = true
+
+  [[widget.setting]]
+  key = "minimal"
+  type = "bool"
+  label_key = "settings.minimal.label"
+  description_key = "settings.minimal.description"
+  default = false
+
+  [[widget.setting]]
+  key = "focused_color"
+  type = "color"
+  label_key = "settings.focused_color.label"
+  description_key = "settings.focused_color.description"
+  default = "primary"
+
+  [[widget.setting]]
+  key = "occupied_color"
+  type = "color"
+  label_key = "settings.occupied_color.label"
+  description_key = "settings.occupied_color.description"
+  default = "secondary"
+
+  [[widget.setting]]
+  key = "empty_color"
+  type = "color"
+  label_key = "settings.empty_color.label"
+  description_key = "settings.empty_color.description"
+  default = "secondary"
+
+  [[widget.setting]]
+  key = "urgent_color"
+  type = "color"
+  label_key = "settings.urgent_color.label"
+  description_key = "settings.urgent_color.description"
+  default = "error"
+
+[[panel]]
+id = "menu"
+entry = "menu.luau"
+width = 280
+height = "content"
+max_height = 460
+placement = "attached"
+position = "auto"
+open_near_click = true
+
+[[service]]
+id = "service"
+entry = "service.luau"
