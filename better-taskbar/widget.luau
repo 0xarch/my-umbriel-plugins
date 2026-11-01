@@ -190,15 +190,11 @@ local function tileTooltip(tile)
   return text
 end
 
-local function activateWindow(window)
+local function activateWindow(window, allowMinimize)
   if type(window.id) ~= "string" or window.id == "" then
     return
   end
-  if window.minimized == true then
-    sendRequest({ action = "window-focus", window = window.id })
-    return
-  end
-  if window.active == true and window.minimizable == true then
+  if allowMinimize and window.active == true and window.minimizable == true then
     sendRequest({ action = "window-minimize", window = window.id })
     return
   end
@@ -228,15 +224,18 @@ local function activateTile(tile)
     return
   end
   if #tile.windows == 1 then
-    activateWindow(tile.windows[1])
+    -- Single window: click focuses, clicking again minimizes (native behavior).
+    activateWindow(tile.windows[1], true)
     return
   end
+  -- Multiple windows: switch straight to the next window, skipping the
+  -- minimize attempt (focusing a minimized window restores it).
   local cursor = cycleCursor[tile.key]
   if type(cursor) ~= "number" or cursor < 1 or cursor > #tile.windows then
     cursor = 1
   end
   cycleCursor[tile.key] = (cursor % #tile.windows) + 1
-  activateWindow(tile.windows[cursor])
+  activateWindow(tile.windows[cursor], false)
 end
 
 local function switchWorkspace(workspace)
@@ -282,15 +281,15 @@ local function makeTile(tile, showTitles, titleWidth)
   end
 
   -- Indicator dots: one per window. The focused window's dot uses the active
-  -- color, the rest the window indicator color. A lone window keeps a
-  -- transparent placeholder so the icon never shifts when focus moves.
+  -- color, the rest the window indicator color.
   local indicatorChildren = {}
   local winCount = #tile.windows
   if winCount == 1 then
-    if C.showActiveIndicator then
-      local active = tile.windows[1].active == true
-      table.insert(indicatorChildren, makeDot(active and C.activeIndicatorColor or "#00000000", dotSize()))
+    local fill = C.windowIndicatorColor
+    if tile.windows[1].active == true and C.showActiveIndicator then
+      fill = C.activeIndicatorColor
     end
+    table.insert(indicatorChildren, makeDot(fill, dotSize()))
   elseif winCount > 1 then
     local limit = math.min(winCount, 4)
     for i = 1, limit do
