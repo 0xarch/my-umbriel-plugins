@@ -61,6 +61,7 @@ local function readConfig()
     activeIndicatorColor = text("active_indicator_color", "primary"),
     windowIndicatorColor = text("window_indicator_color", "on_surface_variant"),
     windowIndicatorOpacity = number("window_indicator_opacity", 1.0),
+    indicatorPosition = number("indicator_position", 1.0),
     middleClick = text("middle_click", "close"),
     activeOpacity = number("active_opacity", 1.0),
     inactiveOpacity = number("inactive_opacity", 1.0),
@@ -96,6 +97,23 @@ end
 -- Tile diameter: icon + 4px padding (2px each side), leaving gap from bar edge.
 local function tileSize()
   return math.ceil(iconSize() + 4)
+end
+
+-- Column gap that places the indicator dot row at the configured vertical
+-- position. The position is relative: -1.0 = top edge, 0 = center, +1.0 =
+-- bottom edge (default); the pixel offset scales with the tile size, which
+-- follows iconSize. A counterweight of exactly dotSize keeps the icon
+-- centered for any gap, so only the dots move.
+local function indicatorGap(ts)
+  local p = C.indicatorPosition
+  if type(p) ~= "number" then
+    p = 1.0
+  end
+  p = math.max(-1.0, math.min(1.0, p))
+  local half = ts / 2 - dotSize() / 2 - 1 -- keep 1px inside the tile edge
+  local center = ts / 2 + p * half
+  local stackHeight = 2 * center + dotSize() - ts
+  return (stackHeight - iconSize() - 2 * dotSize()) / 2
 end
 
 local function lower(value)
@@ -296,6 +314,7 @@ end
 local function makeTile(tile, showTitles, titleWidth)
   local key = tile.key
   local isVertical = barWidget.isVertical()
+  local ts = tileSize()
 
   local children = {}
   local path = iconPath(tile.appId)
@@ -353,7 +372,7 @@ local function makeTile(tile, showTitles, titleWidth)
   end
 
   local iconStack = ui.column({
-    gap = 1 - dotSize(),
+    gap = indicatorGap(ts),
     align = "center",
     justify = "center",
   }, stackChildren)
@@ -396,7 +415,6 @@ local function makeTile(tile, showTitles, titleWidth)
 
   -- Square tile with circular hover; always set fill (even transparent)
   -- so the reconciler clears it on leave.
-  local ts = tileSize()
   local isHovered = hovered == key
 
   return ui.row({
