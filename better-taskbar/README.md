@@ -68,3 +68,17 @@ colors.
 - Workspace grouping needs per-window workspace data, which Umbriel reports.
 - `prefer_symbolic_icons` is not exposed: the declarative `ui.image` control does
   not tint symbolic icons.
+
+## Development
+
+Headless checks live in `harness/taskbar/` at the repository root and need no
+Wayland session:
+
+```
+lua harness/taskbar/widget.lua     # render tree + ui.* prop validation
+lua harness/taskbar/service.lua    # pins, resolution, launch, actions
+bash harness/taskbar/resolver.sh   # the embedded desktop-entry resolver
+```
+
+See `harness/taskbar/README.md` for what each one covers and how to add a
+scenario.
