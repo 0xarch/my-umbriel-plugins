@@ -17,6 +17,32 @@ local function request(actionRequest)
   panel.close()
 end
 
+local function sendEnvelope(envelope)
+  noctalia.state.set(REQUEST_KEY, envelope)
+  panel.close()
+end
+
+local function stripDesktopId(value)
+  local id = string.lower(value)
+  if string.sub(id, -8) == ".desktop" then
+    return string.sub(id, 1, -9)
+  end
+  return id
+end
+
+-- The desktop entry a class name resolved to, published by the service.
+local function resolvedDesktopId(appId)
+  if type(appId) ~= "string" or appId == "" then
+    return nil
+  end
+  local apps = snapshot ~= nil and type(snapshot.apps) == "table" and snapshot.apps or {}
+  local info = apps[string.lower(appId)]
+  if type(info) == "table" and type(info.id) == "string" and info.id ~= "" then
+    return stripDesktopId(info.id)
+  end
+  return nil
+end
+
 local function primaryWindow()
   if target == nil or type(target.windows) ~= "table" then
     return nil
@@ -33,10 +59,16 @@ local function isPinned()
   if target == nil or type(target.app_id) ~= "string" then
     return false
   end
-  local app = string.lower(target.app_id)
+  local want = stripDesktopId(target.app_id)
+  local resolved = resolvedDesktopId(target.app_id)
   local pins = snapshot ~= nil and type(snapshot.pins) == "table" and snapshot.pins or {}
   for _, pin in ipairs(pins) do
-    if string.lower(pin) == app then
+    local pinned = stripDesktopId(pin)
+    if pinned == want or (resolved ~= nil and pinned == resolved) then
+      return true
+    end
+    local pinResolved = resolvedDesktopId(pin)
+    if pinResolved ~= nil and pinResolved == want then
       return true
     end
   end
@@ -124,7 +156,8 @@ local function render()
       enabled = type(target.app_id) == "string" and target.app_id ~= "",
       onClick = function()
         if type(target.app_id) == "string" and target.app_id ~= "" then
-          noctalia.runAsync({ "gtk-launch", target.app_id })
+          sendEnvelope({ kind = "launch", app_id = target.app_id })
+          return
         end
         panel.close()
       end,

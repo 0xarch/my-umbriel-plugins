@@ -27,7 +27,13 @@ noctalia msg panel-toggle io.soloev/better-taskbar:menu
 
 - `umbriel` - the compositor must expose its IPC socket (`UMBRIEL_SOCKET`, or
   `$XDG_RUNTIME_DIR/umbriel-$WAYLAND_DISPLAY.sock`).
-- `gtk-launch` to start a pinned app that is not running.
+- `bash` and POSIX `awk` for the desktop-entry lookup, plus `gio` (or
+  `gtk-launch`) to start a pinned app that is not running.
+
+Window `app_id`s are class names, which do not always equal the `.desktop`
+id (`QQ` runs as `com.qq.QQ`). The service resolves each id against the
+installed entries the way the built-in taskbar does, pins the resolved
+desktop id, and launches through the entry file itself.
 
 ## Usage
 

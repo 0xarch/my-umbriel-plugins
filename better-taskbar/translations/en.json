@@ -16,7 +16,7 @@
   },
   "notify": {
     "action_failed": "Umbriel rejected {action}",
-    "launch_failed": "Could not launch this app",
+    "launch_failed": "Could not launch {app}",
     "pin_failed": "Cannot pin {app}: no matching .desktop file"
   },
   "settings": {

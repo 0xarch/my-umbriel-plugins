@@ -17,6 +17,8 @@ local hovered = nil
 local hoverTargets = {}
 local iconCache = {}
 local cycleCursor = {}
+-- lowercased window app id -> desktop entry published by the service
+local appIndex = {}
 
 local C = {}
 
@@ -123,22 +125,65 @@ local function lower(value)
   return string.lower(value)
 end
 
+local function stripDesktopId(value)
+  local id = lower(value)
+  if string.sub(id, -8) == ".desktop" then
+    return string.sub(id, 1, -9)
+  end
+  return id
+end
+
+-- The desktop id a window's class name resolves to, when the service found one.
+local function resolvedDesktopId(appId)
+  local info = appIndex[lower(appId)]
+  if type(info) == "table" and type(info.id) == "string" and info.id ~= "" then
+    return stripDesktopId(info.id)
+  end
+  return nil
+end
+
+-- A pin stores a desktop id; a window reports a class name. They match when the
+-- raw values agree or when both resolve to the same desktop entry (QQ reports
+-- "QQ" while its entry is com.qq.QQ).
 local function appMatches(windowAppId, pin)
   local app = lower(windowAppId)
-  local want = lower(pin)
+  local want = stripDesktopId(pin)
   if app == "" or want == "" then
     return false
   end
-  if app == want then
+  if stripDesktopId(app) == want then
     return true
   end
-  if app .. ".desktop" == want then
+  local windowDesktop = resolvedDesktopId(windowAppId)
+  if windowDesktop ~= nil and windowDesktop == want then
     return true
   end
-  if want .. ".desktop" == app then
-    return true
+  -- The pin may be a raw class name while the window reports the desktop id.
+  local pinDesktop = resolvedDesktopId(pin)
+  return pinDesktop ~= nil and pinDesktop == stripDesktopId(app)
+end
+
+-- Stable grouping key: the desktop id when known, so two class names for the
+-- same app merge like the built-in taskbar.
+local function groupKey(appId)
+  local desktop = resolvedDesktopId(appId)
+  if desktop ~= nil then
+    return desktop
   end
-  return false
+  local key = lower(appId)
+  if key ~= "" then
+    return key
+  end
+  return nil
+end
+
+-- Display name from the desktop entry, falling back to the raw id.
+local function appLabel(appId)
+  local info = appIndex[lower(appId)]
+  if type(info) == "table" and type(info.name) == "string" and info.name ~= "" then
+    return info.name
+  end
+  return appId
 end
 
 local function iconPath(appId)
@@ -193,10 +238,11 @@ end
 local function tileTooltip(tile)
   local windows = tile.windows
   if #windows == 0 then
+    local label = tile.label or tile.appId
     if tile.pinned then
-      return tile.appId .. "\n" .. noctalia.tr("tooltip.pinned_not_running")
+      return label .. "\n" .. noctalia.tr("tooltip.pinned_not_running")
     end
-    return tile.appId
+    return label
   end
   local text = windowTitle(windows[1])
   if #windows > 1 then
@@ -224,15 +270,9 @@ local function launchApp(appId)
   if type(appId) ~= "string" or appId == "" then
     return
   end
-  if not noctalia.commandExists("gtk-launch") then
-    noctalia.notifyError(noctalia.tr("notify.launch_failed"), appId)
-    return
-  end
-  noctalia.runAsync({ "gtk-launch", appId }, function(result)
-    if result ~= nil and result.exitCode ~= 0 then
-      noctalia.notifyError(noctalia.tr("notify.launch_failed"), appId)
-    end
-  end)
+  -- The service resolves the desktop entry and starts it; it also reports
+  -- failures, so the widget stays a view.
+  sendEnvelope({ kind = "launch", app_id = appId })
 end
 
 local function activateTile(tile)
@@ -386,8 +426,12 @@ local function makeTile(tile, showTitles, titleWidth)
 
   local rowChildren = { iconStack }
   if showTitles then
+    local title = tile.label or tile.appId or ""
+    if #tile.windows > 0 then
+      title = windowTitle(tile.windows[1])
+    end
     table.insert(rowChildren, ui.label({
-      text = windowTitle(tile.windows[1]),
+      text = title,
       fontSize = 11,
       maxWidth = titleWidth,
       maxLines = 1,
@@ -405,7 +449,7 @@ local function makeTile(tile, showTitles, titleWidth)
     app_id = tile.appId,
     pinned = tile.pinned == true,
     running = tile.running == true,
-    heading = #tile.windows > 0 and windowTitle(tile.windows[1]) or tile.appId,
+    heading = #tile.windows > 0 and windowTitle(tile.windows[1]) or (tile.label or tile.appId),
     window_count = #tile.windows,
     windows = {},
     pin_index = tile.pinIndex,
@@ -479,6 +523,7 @@ local function workspaceActive(ws, workspacesById)
 end
 
 local function buildRenderModel()
+  appIndex = type(snapshot.apps) == "table" and snapshot.apps or {}
   local windows = snapshot.windows or {}
   local workspaces = snapshot.workspaces or {}
   local output = barWidget.outputName()
@@ -566,6 +611,7 @@ local function buildFlatTiles(model)
     table.insert(tiles, {
       key = "pin:" .. pin,
       appId = pin,
+      label = appLabel(pin),
       windows = matching,
       pinned = true,
       running = #matching > 0,
@@ -575,20 +621,18 @@ local function buildFlatTiles(model)
   end
 
   if C.showRunning then
-    -- Group non-pinned windows by app_id for merged tiles, then sort
+    -- Group non-pinned windows by desktop entry for merged tiles, then sort
     -- by stable key so focus changes never reorder tiles.
     local byApp = {}
     local appOrder = {}
     for index, window in ipairs(model.windows) do
       if not used[index] then
-        local appKey = lower(window.app_id)
-        if appKey == "" then
-          appKey = window.id
-        end
+        local appKey = groupKey(window.app_id) or window.id
         if byApp[appKey] == nil then
           byApp[appKey] = {
             key = "app:" .. appKey,
             appId = window.app_id,
+            label = appLabel(window.app_id),
             windows = {},
             pinned = false,
             running = true,
@@ -635,14 +679,12 @@ local function groupWindowsByApp(windows, prefix)
   local order = {}
   local groups = {}
   for _, window in ipairs(windows) do
-    local key = lower(window.app_id)
-    if key == "" then
-      key = window.id
-    end
+    local key = groupKey(window.app_id) or window.id
     if groups[key] == nil then
       groups[key] = {
         key = prefix .. ":" .. key,
         appId = window.app_id,
+        label = appLabel(window.app_id),
         windows = {},
         pinned = false,
         running = true,
