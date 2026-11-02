@@ -130,10 +130,31 @@ for d in "${dirs[@]}"; do
     files+=("$f")
   done < <(find "$appdir" -name '*.desktop' \( -type f -o -type l \) -print0 2>/dev/null)
 done
-[ ${#files[@]} -gt 0 ] || exit 1
 
-keys=$(printf '%s\n' "$@")
-result=$(TSV_KEYS="$keys" XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-}" awk '
+# Keys that are paths to a .desktop file (a hand-written pin can name one) are
+# used as-is: no XDG lookup can find a file outside the application dirs.
+keys=()
+direct=""
+for k in "$@"; do
+  f=""
+  case "$k" in
+    */*) f=${k/#\~/$HOME} ;;
+  esac
+  if [ -n "$f" ] && [ -f "$f" ]; then
+    id=${f##*/}
+    id=${id%.desktop}
+    name=$(awk '/^\[/{g=($0=="[Desktop Entry]");next} g&&/^Name=/{sub(/^Name=/,"");print;exit}' "$f" 2>/dev/null)
+    direct="${direct}$(printf '%s\t%s\t%s\t%s\n' "$k" "$id" "$f" "$name")
+"
+    continue
+  fi
+  keys+=("$k")
+done
+
+result=""
+if [ ${#keys[@]} -gt 0 ] && [ ${#files[@]} -gt 0 ]; then
+  tsvin=$(printf '%s\n' "${keys[@]}")
+  result=$(TSV_KEYS="$tsvin" XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-}" awk '
 function is_true(v) { v = tolower(v); return v == "true" || v == "1" }
 
 function decode(v,   out, i, c, n) {
@@ -304,15 +325,24 @@ END {
   for (ki = 1; ki <= count; ki++) {
     key = keys[ki]
     if (key == "") continue
-    v = tolower(key)
+    k = key
+    sub(/\.desktop$/, "", k)
+    v = tolower(k)
     idx = find_best(v)
-    if (idx == 0) idx = find_tail(key, v)
-    if (idx == 0) idx = find_tokens(key)
+    if (idx == 0) idx = find_tail(k, v)
+    if (idx == 0) idx = find_tokens(k)
     if (idx == 0) continue
     printf "%s\t%s\t%s\t%s\n", key, eid[idx], epath[idx], ename[idx]
   }
 }
 ' "${files[@]}" 2>/dev/null)
+fi
+if [ -n "$result" ]; then
+  result="$result
+$direct"
+else
+  result="$direct"
+fi
 
 [ -n "$result" ] || exit 1
 
