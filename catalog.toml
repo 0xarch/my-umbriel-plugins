@@ -5,7 +5,7 @@
 [[plugin]]
 id = "io.soloev/better-taskbar"
 name = "Better Taskbar"
-version = "0.1.0"
+version = "0.5.4"
 author = "io.soloev"
 license = "MIT"
 icon = "layout-bottombar"
