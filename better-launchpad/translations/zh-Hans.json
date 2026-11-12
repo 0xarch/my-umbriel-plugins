@@ -1,0 +1,93 @@
+{
+  "title": "更好启动台",
+  "search": {
+    "placeholder": "搜索应用…",
+    "emoji": "搜索表情…",
+    "wallpaper": "搜索壁纸…",
+    "session": "搜索会话操作…",
+    "windows": "搜索打开的窗口…",
+    "calculator": "输入表达式…",
+    "providers": "搜索提供程序…",
+    "clear": "清除"
+  },
+  "providers": {
+    "calculator": {
+      "title": "计算器"
+    },
+    "emoji": {
+      "title": "表情"
+    },
+    "wallpaper": {
+      "title": "壁纸"
+    },
+    "session": {
+      "title": "会话",
+      "action": "会话操作",
+      "command": "自定义命令"
+    },
+    "windows": {
+      "title": "窗口"
+    }
+  },
+  "categories": {
+    "all": "全部",
+    "recent": "最近使用",
+    "internet": "网络",
+    "multimedia": "多媒体",
+    "development": "开发",
+    "games": "游戏",
+    "graphics": "图形",
+    "office": "办公",
+    "education": "教育",
+    "system": "系统",
+    "utilities": "工具",
+    "emoji": {
+      "people": "人物",
+      "animals": "动物",
+      "food": "食物",
+      "travel": "旅行",
+      "activity": "活动",
+      "objects": "物品",
+      "symbols": "符号",
+      "flags": "旗帜",
+      "nature": "自然"
+    }
+  },
+  "empty": {
+    "title": "没有结果",
+    "body": "试试其他搜索词。",
+    "emoji": "试试表情名称或关键词。",
+    "wallpaper": "壁纸目录中没有找到壁纸。",
+    "windows": "合成器没有报告打开的窗口。",
+    "providers": "输入提供程序名称或前缀。"
+  },
+  "calculator": {
+    "empty": {
+      "title": "计算",
+      "body": "输入表达式，然后按 Enter 复制结果。"
+    },
+    "pending": "正在计算…"
+  },
+  "action": {
+    "lock": "锁定",
+    "logout": "注销",
+    "suspend": "挂起",
+    "lock_and_suspend": "锁定并挂起",
+    "reboot": "重启",
+    "reboot_uefi": "重启到固件设置",
+    "shutdown": "关机",
+    "command": "命令"
+  },
+  "hint": "↑↓ 导航 · Enter 打开 · Esc 关闭",
+  "result": "个结果",
+  "results": "个结果",
+  "copy": {
+    "failed": "无法复制结果。"
+  },
+  "settings": {
+    "glyph": {
+      "label": "按钮图标",
+      "description": "栏上启动按钮显示的图标。"
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "title": "Better Launchpad",
+  "search": {
+    "placeholder": "Search applications…",
+    "emoji": "Search emoji…",
+    "wallpaper": "Search wallpapers…",
+    "session": "Search session actions…",
+    "windows": "Search open windows…",
+    "calculator": "Type an expression…",
+    "providers": "Search providers…",
+    "clear": "Clear"
+  },
+  "providers": {
+    "calculator": {
+      "title": "Calculator"
+    },
+    "emoji": {
+      "title": "Emoji"
+    },
+    "wallpaper": {
+      "title": "Wallpaper"
+    },
+    "session": {
+      "title": "Session",
+      "action": "Session action",
+      "command": "Custom command"
+    },
+    "windows": {
+      "title": "Windows"
+    }
+  },
+  "categories": {
+    "all": "All",
+    "recent": "Recently used",
+    "internet": "Internet",
+    "multimedia": "Multimedia",
+    "development": "Development",
+    "games": "Games",
+    "graphics": "Graphics",
+    "office": "Office",
+    "education": "Education",
+    "system": "System",
+    "utilities": "Utilities",
+    "emoji": {
+      "people": "People",
+      "animals": "Animals",
+      "food": "Food",
+      "travel": "Travel",
+      "activity": "Activity",
+      "objects": "Objects",
+      "symbols": "Symbols",
+      "flags": "Flags",
+      "nature": "Nature"
+    }
+  },
+  "empty": {
+    "title": "No results",
+    "body": "Try a different search.",
+    "emoji": "Try an emoji name or keyword.",
+    "wallpaper": "No wallpapers were found in your wallpaper directory.",
+    "windows": "No open windows were reported by the compositor.",
+    "providers": "Type a provider name or prefix."
+  },
+  "calculator": {
+    "empty": {
+      "title": "Calculate",
+      "body": "Type an expression, then press Enter to copy the result."
+    },
+    "pending": "Calculating…"
+  },
+  "action": {
+    "lock": "Lock",
+    "logout": "Log out",
+    "suspend": "Suspend",
+    "lock_and_suspend": "Lock and suspend",
+    "reboot": "Reboot",
+    "reboot_uefi": "Reboot to firmware",
+    "shutdown": "Shut down",
+    "command": "Command"
+  },
+  "hint": "↑↓ navigate · Enter open · Esc close",
+  "result": "result",
+  "results": "results",
+  "copy": {
+    "failed": "Could not copy the result."
+  },
+  "settings": {
+    "glyph": {
+      "label": "Button glyph",
+      "description": "Glyph shown by the launcher button on the bar."
+    }
+  }
+}

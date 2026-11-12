@@ -3,6 +3,18 @@
 # Keep one [[plugin]] row per plugin subdirectory.
 
 [[plugin]]
+id = "io.soloev/better-launchpad"
+name = "Better Launchpad"
+version = "0.1.0"
+author = "io.soloev"
+license = "MIT"
+icon = "rocket"
+description = "Built-in launcher's Simple layout as a standalone panel: apps, calculator, emoji, wallpapers, session, windows."
+plugin_api = 46
+tags = ["launcher", "panel", "utility"]
+dependencies = []
+
+[[plugin]]
 id = "io.soloev/better-taskbar"
 name = "Better Taskbar"
 version = "0.5.4"

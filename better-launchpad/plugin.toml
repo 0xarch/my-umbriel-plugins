@@ -1,0 +1,43 @@
+# Better Launchpad - the built-in launcher's Simple layout as a standalone plugin.
+#
+# The launcher is a floating panel opened from a bar button (or by id). It reads
+# the existing shell.launcher and wallpaper settings, so it follows the user's
+# current launcher configuration where it makes sense.
+
+id = "io.soloev/better-launchpad"
+name = "Better Launchpad"
+version = "0.1.0"
+plugin_api = 46
+author = "io.soloev"
+license = "MIT"
+dependencies = []
+tags = ["launcher", "panel", "utility"]
+icon = "rocket"
+description = "A standalone launcher panel with apps, calculator, emoji, wallpapers, session actions, and windows."
+
+[[widget]]
+id = "launcher"
+entry = "button.luau"
+
+  [widget.actions]
+  middle = "none"
+
+  [[widget.setting]]
+  key = "glyph"
+  type = "glyph"
+  label_key = "settings.glyph.label"
+  description_key = "settings.glyph.description"
+  default = "rocket"
+
+[[panel]]
+id = "launchpad"
+entry = "launcher.luau"
+width = 560
+height = 500
+placement = "floating"
+position = "center"
+dismiss_on_outside_click = true
+capture_keys = [
+  "Up", "Down", "Left", "Right", "PageUp", "PageDown",
+  "Ctrl+j", "Ctrl+k", "Ctrl+n", "Ctrl+p", "Ctrl+b", "Ctrl+f",
+]
