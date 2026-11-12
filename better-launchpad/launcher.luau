@@ -449,8 +449,7 @@ end
 
 local currentDesktop = (noctalia.getenv("XDG_CURRENT_DESKTOP") or ""):upper()
 
-local function parseDesktopFile(path, id)
-  local content = noctalia.readFile(path)
+local function parseDesktopContent(content, path, id)
   if type(content) ~= "string" or content == "" then
     return nil
   end
@@ -579,10 +578,11 @@ local function appSearchRoots()
   return roots
 end
 
--- The full application scan is spread over frame ticks: reading and parsing a
--- few hundred desktop files at once exceeds the 25 ms callback budget.
+-- Discovery runs off the callback thread: `find` produces the candidate list and
+-- each desktop file is read with readFileAsync. Parsing a few hundred files in
+-- one callback would blow the 25 ms per-callback CPU budget.
 local APP_SCAN_INTERVAL = 30
-local APP_SCAN_FILES_PER_TICK = 4
+local APP_READ_CONCURRENCY = 8
 
 local function finishAppScan()
   local scan = appScan
@@ -607,81 +607,91 @@ local function finishAppScan()
     refresh()
     render()
   end
-  panel.setNeedsFrameTick(false)
+end
+
+local pumpAppScan
+
+local function enqueueDesktopFile(scan, path)
+  local name = path:match("([^/]+)$")
+  if name == nil or name:sub(-8) ~= ".desktop" then
+    return
+  end
+  local id = name:sub(1, #name - 8)
+  if scan.seen[id] then
+    return
+  end
+  scan.seen[id] = true
+  scan.queue[#scan.queue + 1] = { path = path, id = id }
 end
 
 local function startAppScan()
   if appScan ~= nil then
-    panel.setNeedsFrameTick(true)
     return
   end
-  local stack = {}
   local roots = appSearchRoots()
-  for index = #roots, 1, -1 do
-    stack[#stack + 1] = { path = roots[index], depth = 1 }
-  end
-  appScan = {
-    stack = stack,
-    current = nil,
-    names = nil,
-    index = 1,
+  local scan = {
+    queue = {},
+    cursor = 1,
+    inFlight = 0,
     out = {},
     seen = {},
   }
-  panel.setNeedsFrameTick(true)
+  appScan = scan
+
+  local argv = { "find" }
+  for _, root in ipairs(roots) do
+    argv[#argv + 1] = root
+  end
+  argv[#argv + 1] = "-maxdepth"
+  argv[#argv + 1] = "4"
+  argv[#argv + 1] = "-name"
+  argv[#argv + 1] = "*.desktop"
+
+  local started = noctalia.runAsync(argv, function(result)
+    if appScan ~= scan then
+      return
+    end
+    local stdout = type(result) == "table" and result.stdout or ""
+    for path in stdout:gmatch("[^\n]+") do
+      enqueueDesktopFile(scan, path)
+    end
+    pumpAppScan()
+  end, 15000)
+
+  if not started then
+    finishAppScan()
+  end
 end
 
-local function stepAppScan(maxFiles)
+pumpAppScan = function()
   local scan = appScan
   if scan == nil then
     return
   end
-  local processed = 0
-  while scan ~= nil and processed < maxFiles do
-    if scan.current == nil then
-      local dir = table.remove(scan.stack)
-      if dir == nil then
-        finishAppScan()
-        return
-      end
-      scan.current = dir
-      local names = noctalia.listDir(dir.path)
-      if type(names) == "table" then
-        table.sort(names)
-      else
-        names = {}
-      end
-      scan.names = names
-      scan.index = 1
-    end
 
-    local names = scan.names
-    if scan.index > #names then
-      scan.current = nil
-      scan.names = nil
-    else
-      local name = names[scan.index]
-      scan.index = scan.index + 1
-      local path = scan.current.path .. "/" .. name
-      local info = noctalia.fileInfo(path)
-      if type(info) == "table" then
-        if info.isDir then
-          if scan.current.depth < 4 and name:sub(1, 1) ~= "." then
-            scan.stack[#scan.stack + 1] = { path = path, depth = scan.current.depth + 1 }
-          end
-        elseif name:sub(-8) == ".desktop" then
-          local id = name:sub(1, #name - 8)
-          if not scan.seen[id] then
-            scan.seen[id] = true
-            local entry = parseDesktopFile(path, id)
-            if entry ~= nil then
-              scan.out[#scan.out + 1] = entry
-            end
-            processed = processed + 1
+  while scan.inFlight < APP_READ_CONCURRENCY and scan.cursor <= #scan.queue do
+    local item = scan.queue[scan.cursor]
+    scan.cursor = scan.cursor + 1
+    scan.inFlight = scan.inFlight + 1
+    local started = noctalia.readFileAsync(item.path, function(contents)
+      if appScan == scan then
+        scan.inFlight = scan.inFlight - 1
+        if type(contents) == "string" and contents ~= "" then
+          local entry = parseDesktopContent(contents, item.path, item.id)
+          if entry ~= nil then
+            scan.out[#scan.out + 1] = entry
           end
         end
+        pumpAppScan()
       end
+    end)
+    if not started then
+      scan.inFlight = scan.inFlight - 1
     end
+  end
+
+  if scan.inFlight == 0 and scan.cursor > #scan.queue then
+    finishAppScan()
   end
 end
 
@@ -2257,12 +2267,6 @@ function onKey(chord, pressed)
   end
 end
 
-function onFrameTick(_deltaMs)
-  if appScan ~= nil then
-    stepAppScan(APP_SCAN_FILES_PER_TICK)
-  end
-end
-
 function onOpen(context)
   isOpen = true
   config = loadConfig()
@@ -2286,5 +2290,4 @@ end
 function onClose()
   isOpen = false
   calcSeq = calcSeq + 1
-  panel.setNeedsFrameTick(false)
 end
