@@ -582,7 +582,7 @@ end
 -- The full application scan is spread over frame ticks: reading and parsing a
 -- few hundred desktop files at once exceeds the 25 ms callback budget.
 local APP_SCAN_INTERVAL = 30
-local APP_SCAN_FILES_PER_TICK = 16
+local APP_SCAN_FILES_PER_TICK = 4
 
 local function finishAppScan()
   local scan = appScan
