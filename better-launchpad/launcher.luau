@@ -194,6 +194,7 @@ local catFilter = "all"
 local config = nil
 local apps = nil
 local appsAt = 0
+local appScan = nil
 local appCategories = nil
 local emoji = nil
 local emojiAt = 0
@@ -217,6 +218,7 @@ local forceList = false
 
 -- Forward declarations for functions used by asynchronous callbacks.
 local refresh
+local resolvePinned
 
 -- ── settings ────────────────────────────────────────────────────────────────
 
@@ -549,84 +551,146 @@ local function parseDesktopFile(path, id)
   return entry
 end
 
-local function collectApplications()
-  local out = {}
+local function appSearchRoots()
+  local roots = {}
   local seen = {}
 
-  local function walk(dir, depth)
-    local names = noctalia.listDir(dir)
-    if type(names) ~= "table" then
-      return
-    end
-    for _, name in ipairs(names) do
-      local path = dir .. "/" .. name
-      local info = noctalia.fileInfo(path)
-      if type(info) == "table" then
-        if info.isDir then
-          if depth < 4 then
-            walk(path, depth + 1)
-          end
-        elseif name:sub(-8) == ".desktop" then
-          local id = name:sub(1, #name - 8)
-          if not seen[id] then
-            seen[id] = true
-            local entry = parseDesktopFile(path, id)
-            if entry ~= nil then
-              out[#out + 1] = entry
-            end
-          end
-        end
-      end
-    end
-  end
-
-  local dirs = {}
-  local seenDirs = {}
-  local function addDir(dir)
-    if type(dir) == "string" and dir ~= "" and not seenDirs[dir] then
-      seenDirs[dir] = true
-      dirs[#dirs + 1] = dir
+  local function add(path)
+    if type(path) == "string" and path ~= "" and not seen[path] then
+      seen[path] = true
+      roots[#roots + 1] = path .. "/applications"
     end
   end
 
   local home = noctalia.getenv("HOME")
   local dataHome = noctalia.getenv("XDG_DATA_HOME")
-  addDir(((type(dataHome) == "string" and dataHome ~= "" and dataHome) or (home and (home .. "/.local/share"))) or nil)
+  add((type(dataHome) == "string" and dataHome ~= "" and dataHome) or (home and (home .. "/.local/share")) or nil)
   local dataDirs = noctalia.getenv("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
   for dir in dataDirs:gmatch("([^:]+)") do
-    addDir(dir)
+    add(dir)
   end
-  addDir("/usr/local/share")
-  addDir("/usr/share")
+  add("/usr/local/share")
+  add("/usr/share")
   if home ~= nil then
-    addDir(home .. "/.local/share/flatpak/exports/share")
+    add(home .. "/.local/share/flatpak/exports/share")
   end
-  addDir("/var/lib/flatpak/exports/share")
-  addDir("/var/lib/snapd/desktop")
+  add("/var/lib/flatpak/exports/share")
+  add("/var/lib/snapd/desktop")
+  return roots
+end
 
-  for _, root in ipairs(dirs) do
-    walk(root .. "/applications", 1)
+-- The full application scan is spread over frame ticks: reading and parsing a
+-- few hundred desktop files at once exceeds the 25 ms callback budget.
+local APP_SCAN_INTERVAL = 30
+local APP_SCAN_FILES_PER_TICK = 16
+
+local function finishAppScan()
+  local scan = appScan
+  if scan == nil then
+    return
   end
-
+  appScan = nil
+  local out = scan.out
   table.sort(out, function(a, b)
     if a.nameLower == b.nameLower then
       return a.id < b.id
     end
     return a.nameLower < b.nameLower
   end)
-  return out
+  apps = out
+  appsAt = os.time()
+  appCategories = nil
+  pinnedRank = {}
+  pinnedSet = {}
+  resolvePinned()
+  if isOpen then
+    refresh()
+    render()
+  end
+  panel.setNeedsFrameTick(false)
+end
+
+local function startAppScan()
+  if appScan ~= nil then
+    panel.setNeedsFrameTick(true)
+    return
+  end
+  local stack = {}
+  local roots = appSearchRoots()
+  for index = #roots, 1, -1 do
+    stack[#stack + 1] = { path = roots[index], depth = 1 }
+  end
+  appScan = {
+    stack = stack,
+    current = nil,
+    names = nil,
+    index = 1,
+    out = {},
+    seen = {},
+  }
+  panel.setNeedsFrameTick(true)
+end
+
+local function stepAppScan(maxFiles)
+  local scan = appScan
+  if scan == nil then
+    return
+  end
+  local processed = 0
+  while scan ~= nil and processed < maxFiles do
+    if scan.current == nil then
+      local dir = table.remove(scan.stack)
+      if dir == nil then
+        finishAppScan()
+        return
+      end
+      scan.current = dir
+      local names = noctalia.listDir(dir.path)
+      if type(names) == "table" then
+        table.sort(names)
+      else
+        names = {}
+      end
+      scan.names = names
+      scan.index = 1
+    end
+
+    local names = scan.names
+    if scan.index > #names then
+      scan.current = nil
+      scan.names = nil
+    else
+      local name = names[scan.index]
+      scan.index = scan.index + 1
+      local path = scan.current.path .. "/" .. name
+      local info = noctalia.fileInfo(path)
+      if type(info) == "table" then
+        if info.isDir then
+          if scan.current.depth < 4 and name:sub(1, 1) ~= "." then
+            scan.stack[#scan.stack + 1] = { path = path, depth = scan.current.depth + 1 }
+          end
+        elseif name:sub(-8) == ".desktop" then
+          local id = name:sub(1, #name - 8)
+          if not scan.seen[id] then
+            scan.seen[id] = true
+            local entry = parseDesktopFile(path, id)
+            if entry ~= nil then
+              scan.out[#scan.out + 1] = entry
+            end
+            processed = processed + 1
+          end
+        end
+      end
+    end
+  end
 end
 
 local function getApplications(force)
   local now = os.time()
-  if force or apps == nil or now - appsAt > 30 then
-    apps = collectApplications()
-    appsAt = now
-    appCategories = nil
-    pinnedRank = {}
-    pinnedSet = {}
+  if apps == nil or force or now - appsAt > APP_SCAN_INTERVAL then
+    startAppScan()
   end
-  return apps
+  return apps or {}
 end
 
 local function primaryCategory(categoriesString)
@@ -665,7 +729,7 @@ local function buildAppCategories()
   return out
 end
 
-local function resolvePinned()
+resolvePinned = function()
   pinnedRank = {}
   pinnedSet = {}
   if config == nil or type(config.pinned) ~= "table" then
@@ -2193,6 +2257,12 @@ function onKey(chord, pressed)
   end
 end
 
+function onFrameTick(_deltaMs)
+  if appScan ~= nil then
+    stepAppScan(APP_SCAN_FILES_PER_TICK)
+  end
+end
+
 function onOpen(context)
   isOpen = true
   config = loadConfig()
@@ -2216,4 +2286,5 @@ end
 function onClose()
   isOpen = false
   calcSeq = calcSeq + 1
+  panel.setNeedsFrameTick(false)
 end
