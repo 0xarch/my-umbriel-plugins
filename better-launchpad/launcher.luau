@@ -2186,10 +2186,10 @@ function onKey(chord, pressed)
     moveSelection(1)
   elseif isGrid() and (chord == "Left" or chord == "Ctrl+b") then
     moveSelection(-1)
-  elseif chord == "PageDown" then
-    moveSelection(columns * 5)
-  elseif chord == "PageUp" then
+  elseif chord == "Prior" then
     moveSelection(-columns * 5)
+  elseif chord == "Next" then
+    moveSelection(columns * 5)
   end
 end
 
