@@ -210,8 +210,6 @@ local calcFor = nil
 local calcSeq = 0
 local calcPending = false
 local iconCache = {}
-local iconBudget = 0
-local iconPending = false
 local usageBuiltinCounts = {}
 local usageBuiltinRecent = {}
 local usageOwn = { counts = {}, recent = {} }
@@ -1797,9 +1795,24 @@ local function isGrid()
     or providerId == "Wallpaper" or providerId == "Session" or providerId == "Overview"
 end
 
--- Icon-theme lookups are the expensive part of a grid render. Resolve a few
--- per frame and show glyph fallbacks for the rest until the next frame.
-local ICON_LOOKUPS_PER_RENDER = 1
+-- Icon-theme lookups are the expensive part of a grid render, and they stack
+-- with the tree rebuild when they run inside it. Render with cached paths and
+-- glyph fallbacks only; queued names are resolved one per frame tick, and a
+-- frame either looks an icon up or rebuilds the tree, never both.
+local iconQueue = {}
+local iconQueued = {}
+
+local function queueIcon(name, size)
+  if type(name) ~= "string" or name == "" or type(size) ~= "number" then
+    return
+  end
+  local key = name .. "@" .. tostring(size)
+  if iconCache[key] ~= nil or iconQueued[key] then
+    return
+  end
+  iconQueued[key] = true
+  iconQueue[#iconQueue + 1] = { key = key, name = name, size = size }
+end
 
 local function resolveIcon(name, size)
   if type(name) ~= "string" or name == "" then
@@ -1807,24 +1820,14 @@ local function resolveIcon(name, size)
   end
   local key = name .. "@" .. tostring(size)
   local cached = iconCache[key]
-  if cached ~= nil then
-    if cached == false then
-      return nil
-    end
-    return cached
-  end
-  if iconBudget <= 0 then
-    iconPending = true
+  if cached == nil then
+    queueIcon(name, size)
     return nil
   end
-  iconBudget = iconBudget - 1
-  local path = noctalia.appIconPath(name, size)
-  if type(path) == "string" and path ~= "" then
-    iconCache[key] = path
-    return path
+  if cached == false then
+    return nil
   end
-  iconCache[key] = false
-  return nil
+  return cached
 end
 
 local function iconNode(result, width, height)
@@ -2280,8 +2283,6 @@ function render()
     return
   end
 
-  iconBudget = ICON_LOOKUPS_PER_RENDER
-  iconPending = false
   moreResults = false
 
   if mode == "edit" then
@@ -2289,7 +2290,7 @@ function render()
   else
     renderNormal()
   end
-  if iconPending or moreResults then
+  if #iconQueue > 0 or moreResults then
     panel.setNeedsFrameTick(true)
   end
 end
@@ -2666,10 +2667,20 @@ function onFrameTick(_deltaMs)
     resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
     needsRender = true
   end
-  if needsRender or iconPending then
+  if #iconQueue > 0 then
+    local job = table.remove(iconQueue, 1)
+    local path = noctalia.appIconPath(job.name, job.size)
+    if type(path) == "string" and path ~= "" then
+      iconCache[job.key] = path
+      needsRender = true
+    else
+      iconCache[job.key] = false
+    end
+  end
+  if needsRender or #iconQueue > 0 then
     render()
   end
-  if not appRefreshPending and not iconPending and not moreResults then
+  if not appRefreshPending and #iconQueue == 0 and not moreResults then
     panel.setNeedsFrameTick(false)
   end
 end
