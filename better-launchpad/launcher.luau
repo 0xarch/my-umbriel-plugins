@@ -2714,7 +2714,9 @@ function onFrameTick(_deltaMs)
     resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
     needsRender = true
   end
-  if #iconQueue > 0 then
+  if not needsRender and #iconQueue > 0 then
+    -- A frame either builds the tree or resolves icons: chunk and refresh
+    -- frames skip the queue, quiet frames spend a small time budget on it.
     local started = os.clock()
     local resolved = false
     while #iconQueue > 0 do
