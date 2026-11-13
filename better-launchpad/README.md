@@ -93,6 +93,16 @@ mode: no search field, just the stored layout with the same tiles.
   (The drag source only arms on the left button and the API exposes no modifier
   state, so "hold Shift to fold" cannot be a gesture — the switch is the
   equivalent without a keyboard.)
+- Click a folder tile to expand it in place: its members follow the tile as
+  normal app tiles, and a **Collapse** tile closes the block again. The expanded
+  members drag like top-level tiles — dropping one on another member reorders
+  the folder, dropping one on a top-level slot moves it out, and dropping a
+  top-level app on a member slot inserts it into that folder. Folder mode keeps
+  working while expanded: a member dropped on an outer app joins it in a new
+  folder.
+- While a folder is expanded its icon becomes a pencil. Clicking the tile opens
+  a rename box under the editor header; Enter or **Rename** stores the new name
+  in `order.json`, and **Cancel** leaves it unchanged.
 - The shell's `shell.launcher.pinned` list seeds the front of the layout the
   first time an app is seen. Pin and Unpin from the context menu move the app
   into or out of the pinned block, and the result is stored in `order.json`

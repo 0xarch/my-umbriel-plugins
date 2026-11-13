@@ -103,13 +103,18 @@
     "empty": "No applications to arrange yet.",
     "mode_swap": "Swap",
     "mode_folder": "Folder",
-    "hint_folder": "Drag an app onto another app to make a folder"
+    "hint_folder": "Drag an app onto another app to make a folder",
+    "collapse": "Collapse"
   },
   "folder": {
     "new": "New Folder",
     "count": "{count} apps",
     "empty": "This folder is empty.",
-    "close": "Close"
+    "close": "Close",
+    "rename": "Rename folder",
+    "rename_placeholder": "Folder name",
+    "rename_confirm": "Rename",
+    "rename_cancel": "Cancel"
   },
   "origin": {
     "flatpak": "Flatpak",

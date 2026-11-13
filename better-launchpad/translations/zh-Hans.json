@@ -103,13 +103,18 @@
     "empty": "还没有可以排列的应用。",
     "mode_swap": "交换",
     "mode_folder": "文件夹",
-    "hint_folder": "把一个应用拖到另一个应用上即可创建文件夹"
+    "hint_folder": "把一个应用拖到另一个应用上即可创建文件夹",
+    "collapse": "收起"
   },
   "folder": {
     "new": "新建文件夹",
     "count": "{count} 个应用",
     "empty": "这个文件夹是空的。",
-    "close": "关闭"
+    "close": "关闭",
+    "rename": "重命名文件夹",
+    "rename_placeholder": "文件夹名称",
+    "rename_confirm": "重命名",
+    "rename_cancel": "取消"
   },
   "origin": {
     "flatpak": "Flatpak",

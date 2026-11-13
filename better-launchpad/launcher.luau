@@ -214,9 +214,16 @@ local orderRank = {}
 local order = nil
 local orderPath = nil
 local mode = "normal"
-local editDragMode = "swap"
+-- Editor state and helpers. The helpers live in the table rather than as
+-- top-level locals: the main chunk is already close to Luau's 200-local limit.
+local editState = {
+  dragMode = "swap",
+  shown = 0,
+  expanded = {},
+  rename = nil,
+  renameRev = 0,
+}
 local hoverFolder = false
-local editShown = 0
 local lastRight = { index = nil, at = 0 }
 local forceList = false
 local resultsShown = 0
@@ -729,27 +736,6 @@ local function folderRow(folderId)
   return nil
 end
 
-local function addToFolder(folderId, path)
-  local row = folderRow(folderId)
-  if row == nil or type(path) ~= "string" or path == "" then
-    return false
-  end
-  for _, member in ipairs(row.entries) do
-    if member == path then
-      return false
-    end
-  end
-  row.entries[#row.entries + 1] = path
-  -- The app's top-level row goes away: membership is exclusive.
-  local index = orderRowIndex(path)
-  if index ~= nil and loadOrder().entries[index].type == "app" then
-    table.remove(loadOrder().entries, index)
-  end
-  saveOrder()
-  reindexOrder()
-  return true
-end
-
 -- Send every member back to the top level at the folder's position, then drop
 -- the folder itself.
 local function disbandFolder(folderId)
@@ -838,6 +824,156 @@ local function moveOrderRow(fromId, toPosition)
   table.insert(store.entries, target, row)
   saveOrder()
   reindexOrder()
+  return true
+end
+
+-- ── editor drag operations ──────────────────────────────────────────────────
+
+-- The editor renders folders and their members in one flat grid, so a drop
+-- names either a top-level slot ("3") or a member slot of an expanded folder
+-- ("3.2": member 2 of the folder in row 3). These helpers move an application
+-- between the top level and folder membership without losing its neighbours.
+editState.parseSlot = function(value)
+  if type(value) ~= "string" then
+    return nil
+  end
+  local top, member = value:match("^(%d+)%.(%d+)$")
+  if top ~= nil then
+    return { top = tonumber(top), member = tonumber(member) }
+  end
+  top = value:match("^(%d+)$")
+  if top ~= nil then
+    return { top = tonumber(top) }
+  end
+  return nil
+end
+
+-- Locate an application: either its top-level row or the folder that owns it.
+editState.locateApp = function(path)
+  if type(path) ~= "string" or path == "" then
+    return nil
+  end
+  for index, row in ipairs(loadOrder().entries) do
+    if row.type == "app" and row.id == path then
+      return { top = index, row = row }
+    end
+    if row.type == "folder" then
+      for member, memberPath in ipairs(row.entries or {}) do
+        if memberPath == path then
+          return { top = index, folder = row, member = member }
+        end
+      end
+    end
+  end
+  return nil
+end
+
+editState.memberIndex = function(folder, path)
+  for index, member in ipairs(folder.entries or {}) do
+    if member == path then
+      return index
+    end
+  end
+  return nil
+end
+
+-- Remove an application from wherever it lives. A folder left without members
+-- disappears, like it does when its last member is removed from the subview.
+editState.detachApp = function(path)
+  local found = editState.locateApp(path)
+  if found == nil then
+    return nil
+  end
+  local store = loadOrder()
+  if found.folder == nil then
+    local pinned = found.row.pinned == true
+    table.remove(store.entries, found.top)
+    return { path = path, pinned = pinned }
+  end
+  table.remove(found.folder.entries, found.member)
+  if #found.folder.entries == 0 then
+    local position = orderRowIndex(found.folder.id)
+    if position ~= nil then
+      table.remove(store.entries, position)
+    end
+  end
+  return { path = path, pinned = false }
+end
+
+-- Dropping an app on a folder tile (or on one of its expanded members) appends
+-- it to that folder, or inserts it at the member slot that was targeted.
+editState.moveIntoFolder = function(path, folder, anchorPath)
+  if path == anchorPath then
+    return false
+  end
+  local found = editState.locateApp(path)
+  if found == nil then
+    return false
+  end
+  if found.folder == folder and (anchorPath == nil or #folder.entries == 1) then
+    return false
+  end
+  -- Read the anchor slot before detaching: the moved member takes the target's
+  -- slot, matching the top-level reorder. Removing a member before the anchor
+  -- shifts it left, and inserting at the old index restores the same result.
+  local at = nil
+  if anchorPath ~= nil then
+    at = editState.memberIndex(folder, anchorPath)
+  end
+  local app = editState.detachApp(path)
+  if app == nil then
+    return false
+  end
+  -- Dragging a folder's last member out removes the folder row; there is
+  -- nothing left to insert into then.
+  if orderRowIndex(folder.id) == nil then
+    return false
+  end
+  if at == nil then
+    folder.entries[#folder.entries + 1] = path
+  else
+    table.insert(folder.entries, at, path)
+  end
+  return true
+end
+
+-- Dropping an expanded member on a top-level slot moves it out of its folder
+-- and takes the target row's place.
+editState.moveOutOfFolder = function(path, anchorRow)
+  local app = editState.detachApp(path)
+  if app == nil then
+    return false
+  end
+  local index = anchorRow ~= nil and orderRowIndex(anchorRow.id) or nil
+  local store = loadOrder()
+  local row = { type = "app", id = path }
+  if app.pinned then
+    row.pinned = true
+  end
+  table.insert(store.entries, index or (#store.entries + 1), row)
+  return true
+end
+
+-- Folder mode: a member dragged onto a top-level app joins it in a new folder.
+editState.foldWithApp = function(target, path)
+  if target == nil or target.type ~= "app" or target.id == path then
+    return false
+  end
+  local app = editState.detachApp(path)
+  if app == nil then
+    return false
+  end
+  return createFolderWithApps({ target.id, path }, nil, target.id) ~= nil
+end
+
+editState.renameFolder = function(folderId, name)
+  local row = folderRow(folderId)
+  name = trim(name or "")
+  if row == nil or name == "" or row.name == name then
+    return false
+  end
+  row.name = name
+  saveOrder()
   return true
 end
 
@@ -2319,16 +2455,20 @@ local function folderIconGrid(row)
   })
 end
 
-local function folderCard(result, focused, key)
+-- `renaming` swaps the four-icon preview for a pencil: an expanded folder in
+-- the editor is renamed through that icon instead of being opened.
+local function folderCard(result, focused, key, renaming)
   local row = result.folder
   local count = #(row.entries or {})
+  local icon = folderIconGrid(row)
+  if renaming then
+    icon = ui.glyph({ name = "pencil", size = 28, color = "primary" })
+  end
   local children = {
     ui.row({ height = TILE_BADGE_BAND, justify = "end", align = "center" }, {
       ui.spacer({ flexGrow = 1 }),
     }),
-    ui.row({ height = TILE_ICON_BAND, justify = "center", align = "center" }, {
-      folderIconGrid(row),
-    }),
+    ui.row({ height = TILE_ICON_BAND, justify = "center", align = "center" }, { icon }),
     ui.column({ height = TILE_NAME_BAND, align = "center", justify = "start", clip = true }, {
       ui.label({
         text = result.title,
@@ -2580,19 +2720,19 @@ local function editHeader()
       fontSize = 11,
       glyphSize = 14,
       variant = "ghost",
-      selected = editDragMode == id,
+      selected = editState.dragMode == id,
       height = 28,
       onClick = function()
-        if editDragMode == id then
+        if editState.dragMode == id then
           return
         end
-        editDragMode = id
+        editState.dragMode = id
         flags.render = true
         panel.setNeedsFrameTick(true)
       end,
     })
   end
-  local hint = editDragMode == "folder"
+  local hint = editState.dragMode == "folder"
       and T("edit.hint_folder", "Drag an app onto another app to make a folder")
       or T("edit.hint", "Drag a tile onto another to reorder")
   -- Two rows: the title shares its row only with the short "Done" button, so a
@@ -2647,10 +2787,24 @@ local function editHeader()
   })
 end
 
-local function editTile(row, position)
+-- A tap (release before the drag threshold) on a folder tile expands it, or
+-- opens the rename input once it is expanded. Drags still arm normally, so the
+-- same tile stays a reorder/fold source.
+editState.folderTileClick = function(row)
+  if editState.expanded[row.id] == true then
+    editState.rename = { id = row.id, value = folderDisplayName(row) }
+    editState.renameRev = editState.renameRev + 1
+  else
+    editState.expanded[row.id] = true
+  end
+  flags.render = true
+  panel.setNeedsFrameTick(true)
+end
+
+local function editTile(row, position, onClick)
   local card = nil
   if row.type == "folder" then
-    card = folderCard(folderResult(row), false, "ecard-" .. position)
+    card = folderCard(folderResult(row), false, "ecard-" .. position, editState.expanded[row.id] == true)
   else
     local entry = findAppByPath(row.id)
     if entry == nil then
@@ -2687,34 +2841,138 @@ local function editTile(row, position)
       height = TILE_HEIGHT,
       flexGrow = 1,
       align = "stretch",
+      onClick = onClick,
     }, { card }),
   })
+end
+
+-- An expanded member is a normal app tile in the folder's slot order. Its drop
+-- value names the member slot ("folderRow.member"), so a drop there inserts into
+-- the folder instead of the top level.
+editState.editMemberTile = function(folder, position, member, path)
+  local entry = findAppByPath(path)
+  if entry == nil then
+    return nil
+  end
+  local result = {
+    provider = "Applications",
+    title = entry.name,
+    iconName = entry.icon ~= "" and entry.icon or "application-x-executable",
+    origin = entry.origin,
+    pinned = false,
+  }
+  local card = tileCard(result, false, "ecard-" .. position .. "-" .. member, false, true)
+  return ui.dropZone({
+    key = "ezone-" .. position .. "-" .. member,
+    height = TILE_HEIGHT,
+    flexGrow = 1,
+    direction = "column",
+    align = "stretch",
+    accepts = { DRAG_TYPE },
+    value = tostring(position) .. "." .. tostring(member),
+    onDrop = "onReorderDrop",
+  }, {
+    ui.dragSource({
+      dragType = DRAG_TYPE,
+      payload = path,
+      previewAncestor = 0,
+      height = TILE_HEIGHT,
+      flexGrow = 1,
+      align = "stretch",
+    }, { card }),
+  })
+end
+
+-- The collapse tile closes the folder's member list. It sits in the grid after
+-- the last member so it reads as part of the expanded block.
+editState.editShrinkTile = function(folder, position)
+  return ui.column({
+    key = "eshrink-" .. position,
+    height = TILE_HEIGHT,
+    flexGrow = 1,
+    align = "stretch",
+    justify = "center",
+  }, {
+    ui.button({
+      key = "eshrinkbtn-" .. position,
+      glyph = "chevron-up",
+      text = T("edit.collapse", "Collapse"),
+      fontSize = 11,
+      glyphSize = 20,
+      variant = "ghost",
+      height = TILE_HEIGHT,
+      flexGrow = 1,
+      onClick = function()
+        editState.expanded[folder.id] = nil
+        if editState.rename ~= nil and editState.rename.id == folder.id then
+          editState.rename = nil
+        end
+        flags.render = true
+        panel.setNeedsFrameTick(true)
+      end,
+    }),
+  })
+end
+
+-- The editor is one flat cell list: stored rows, the members of each expanded
+-- folder, then that folder's collapse tile.
+editState.editCells = function()
+  local cells = {}
+  for position, entry in ipairs(loadOrder().entries) do
+    if entry.type == "folder" or entry.type == "app" then
+      cells[#cells + 1] = { kind = "row", row = entry, position = position }
+      if entry.type == "folder" and editState.expanded[entry.id] == true then
+        for member, path in ipairs(entry.entries or {}) do
+          cells[#cells + 1] = {
+            kind = "member",
+            folder = entry,
+            position = position,
+            member = member,
+            path = path,
+          }
+        end
+        cells[#cells + 1] = { kind = "shrink", folder = entry, position = position }
+      end
+    end
+  end
+  return cells
+end
+
+editState.editNodeFor = function(cell)
+  if cell.kind == "member" then
+    return editState.editMemberTile(cell.folder, cell.position, cell.member, cell.path)
+  elseif cell.kind == "shrink" then
+    return editState.editShrinkTile(cell.folder, cell.position)
+  end
+  local onClick = nil
+  if cell.row.type == "folder" then
+    onClick = function() editState.folderTileClick(cell.row) end
+  end
+  return editTile(cell.row, cell.position, onClick)
 end
 
 -- Building every editor tile in one callback costs more than the 25 ms budget
 -- (64 rows x wrapper + card > 1000 nodes) and the host disables a panel that
 -- times out repeatedly, so the grid grows in chunks like the result grid does.
 local function editNodes()
+  local cells = editState.editCells()
   local nodes = {}
   local row = {}
   local shown = 0
-  local total = 0
-  for position, entry in ipairs(loadOrder().entries) do
-    if entry.type == "folder" or entry.type == "app" then
-      total = total + 1
-      if shown < editShown then
-        -- Count the attempt, not the node: an app whose desktop entry vanished
-        -- renders nothing, and the counter must still advance or the chunked
-        -- grid would schedule frames forever.
-        shown = shown + 1
-        local node = editTile(entry, position)
-        if node ~= nil then
-          row[#row + 1] = node
-          if #row == 5 then
-            nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
-            row = {}
-          end
-        end
+  for _, cell in ipairs(cells) do
+    if shown >= editState.shown then
+      break
+    end
+    -- Count the attempt, not the node: an app whose desktop entry vanished
+    -- renders nothing, and the counter must still advance or the chunked grid
+    -- would schedule frames forever.
+    shown = shown + 1
+    local node = editState.editNodeFor(cell)
+    if node ~= nil then
+      row[#row + 1] = node
+      if #row == 5 then
+        nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
+        row = {}
       end
     end
   end
@@ -2724,8 +2982,80 @@ local function editNodes()
     end
     nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
   end
-  flags.more = shown < total
+  flags.more = shown < #cells
   return nodes
+end
+
+editState.commitRename = function(value)
+  local rename = editState.rename
+  if rename == nil then
+    return
+  end
+  local name = trim(value or rename.value or "")
+  editState.rename = nil
+  if name ~= "" then
+    editState.renameFolder(rename.id, name)
+  end
+  flags.render = true
+  panel.setNeedsFrameTick(true)
+end
+
+editState.cancelRename = function()
+  if editState.rename == nil then
+    return
+  end
+  editState.rename = nil
+  flags.render = true
+  panel.setNeedsFrameTick(true)
+end
+
+-- The rename box sits under the header rather than inside the tile: a drag
+-- source owns its whole area, so a nested input would never receive the click.
+local function renameBanner()
+  local rename = editState.rename
+  if rename == nil then
+    return nil
+  end
+  return ui.row({
+    key = "edit-rename",
+    height = 40,
+    gap = 8,
+    paddingH = 12,
+    align = "center",
+    fill = "surface_container_high",
+    radius = 10,
+    border = "primary/0.4",
+    borderWidth = 1,
+  }, {
+    ui.glyph({ name = "pencil", size = 16, color = "primary" }),
+    ui.input({
+      key = "edit-rename-input-" .. editState.renameRev,
+      value = rename.value,
+      placeholder = T("folder.rename_placeholder", "Folder name"),
+      fontSize = 13,
+      flexGrow = 1,
+      frameVisible = false,
+      focus = true,
+      submitOnEnter = true,
+      onChange = "onRenameChanged",
+      onSubmit = "onRenameSubmit",
+    }),
+    ui.button({
+      key = "edit-rename-ok",
+      text = T("folder.rename_confirm", "Rename"),
+      variant = "secondary",
+      controlSize = "sm",
+      onClick = function() editState.commitRename(editState.rename and editState.rename.value) end,
+    }),
+    ui.button({
+      key = "edit-rename-cancel",
+      glyph = "x",
+      variant = "ghost",
+      controlSize = "sm",
+      tooltip = T("folder.rename_cancel", "Cancel"),
+      onClick = function() editState.cancelRename() end,
+    }),
+  })
 end
 
 local function renderEdit()
@@ -2743,7 +3073,13 @@ local function renderEdit()
   else
     body = ui.scroll({ key = "edit-" .. scrollRev, flexGrow = 1, gap = 6 }, nodes)
   end
-  return ui.column({ flexGrow = 1, gap = 10 }, { editHeader(), body })
+  local parts = { editHeader() }
+  local banner = renameBanner()
+  if banner ~= nil then
+    parts[#parts + 1] = banner
+  end
+  parts[#parts + 1] = body
+  return ui.column({ flexGrow = 1, gap = 10 }, parts)
 end
 
 openFolder = function(row)
@@ -2779,8 +3115,10 @@ enterEditMode = function()
   end
   closeFolder()
   mode = "edit"
-  editDragMode = "swap"
-  editShown = RESULTS_PER_FRAME
+  editState.dragMode = "swap"
+  editState.shown = RESULTS_PER_FRAME
+  editState.expanded = {}
+  editState.rename = nil
   hoverIndex = nil
   keyboardFocus = true
   lastRight.index = nil
@@ -2793,6 +3131,8 @@ exitEditMode = function()
     return
   end
   mode = "normal"
+  editState.expanded = {}
+  editState.rename = nil
   hoverIndex = nil
   keyboardFocus = true
   selected = 1
@@ -2806,41 +3146,64 @@ function onReorderDrop(payload, value)
   if mode ~= "edit" then
     return
   end
-  local target = tonumber(value)
-  local store = loadOrder()
-  local row = target ~= nil and store.entries[target] or nil
-  local from = orderRowIndex(payload)
-  if row == nil or from == nil or from == target then
+  local slot = editState.parseSlot(value)
+  if slot == nil or type(payload) ~= "string" or payload == "" then
     return
   end
-  local dragged = store.entries[from]
-  if editDragMode == "folder" then
-    -- Folders never nest: only an application can be folded, and the target is
-    -- either another application (a new folder) or an existing folder.
-    if dragged.type ~= "app" then
+  local store = loadOrder()
+  local target = store.entries[slot.top]
+  if target == nil then
+    return
+  end
+
+  local changed = false
+  local draggedFolder = folderRow(payload)
+  if draggedFolder ~= nil then
+    -- A folder only reorders among the top-level rows and never nests, so a
+    -- member slot or folder mode is not a place for it.
+    if slot.member ~= nil or editState.dragMode == "folder" then
       return
     end
-    if row.type == "folder" then
-      addToFolder(row.id, payload)
-    elseif row.type == "app" then
-      createFolderWithApps({ row.id, payload }, nil, row.id)
+    changed = moveOrderRow(payload, value)
+  elseif slot.member ~= nil then
+    -- Expanded member slots only exist inside a folder: both modes fold the
+    -- app into that folder at the slot the pointer targeted.
+    if target.type ~= "folder" then
+      return
     end
+    changed = editState.moveIntoFolder(payload, target, target.entries[slot.member])
+  elseif editState.dragMode == "folder" then
+    -- Folders never nest: an app dropped on an app makes a new folder, and one
+    -- dropped on a folder (or a member slot) joins it.
+    if target.type == "folder" then
+      changed = editState.moveIntoFolder(payload, target, nil)
+    else
+      changed = editState.foldWithApp(target, payload)
+    end
+  else
+    -- Swap mode: reordering, but dropping an application on a folder folds it
+    -- in. A member dropped on a top-level app leaves its folder and takes the
+    -- target slot; a top-level app keeps the plain reorder.
+    local located = editState.locateApp(payload)
+    if located == nil then
+      return
+    end
+    if target.type == "folder" then
+      changed = editState.moveIntoFolder(payload, target, nil)
+    elseif located.folder == nil then
+      changed = moveOrderRow(payload, value)
+    else
+      changed = editState.moveOutOfFolder(payload, target)
+    end
+  end
+  if changed then
     -- The drop callback shares the 25 ms budget with the store write, so the
     -- grid rebuild waits for the next frame tick instead of running here.
+    saveOrder()
+    reindexOrder()
     flags.render = true
     panel.setNeedsFrameTick(true)
-    return
   end
-  -- Swap mode: reordering, but dropping an application on a folder folds it in.
-  if row.type == "folder" and dragged.type == "app" then
-    addToFolder(row.id, payload)
-    flags.render = true
-    panel.setNeedsFrameTick(true)
-    return
-  end
-  moveOrderRow(payload, value)
-  flags.render = true
-  panel.setNeedsFrameTick(true)
 end
 
 -- The folder subview floats over a scrim that covers the whole panel,
@@ -3035,6 +3398,19 @@ end
 
 function clearQuery()
   setQuery("")
+end
+
+-- The rename input is uncontrolled between renders: storing the text without
+-- re-rendering keeps the caret where the host put it, and a later frame tick
+-- (chunk growth) still sees the current value.
+function onRenameChanged(value)
+  if editState.rename ~= nil then
+    editState.rename.value = value
+  end
+end
+
+function onRenameSubmit(value)
+  editState.commitRename(value)
 end
 
 function onQueryChanged(value)
@@ -3350,7 +3726,7 @@ function onFrameTick(_deltaMs)
     end
     if flags.more then
       if mode == "edit" then
-        editShown = editShown + RESULTS_PER_FRAME
+        editState.shown = editState.shown + RESULTS_PER_FRAME
       else
         resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
       end
@@ -3428,6 +3804,8 @@ function onOpen(context)
   getApplications(false)
   resolvePinned()
   mode = "normal"
+  editState.expanded = {}
+  editState.rename = nil
   folderOpen = nil
   folderResults = {}
   lastRight.index = nil
