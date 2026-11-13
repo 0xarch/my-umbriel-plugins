@@ -2748,9 +2748,13 @@ function onFrameTick(_deltaMs)
         end
       end
       drained = true
-      if #iconQueue == 0 and iconCacheDirty then
-        saveIconCache()
-        iconCacheDirty = false
+      if #iconQueue == 0 then
+        -- Draw every resolved icon in one pass instead of one rebuild per
+        -- batch, and persist the cache now that the queue is settled.
+        if iconCacheDirty then
+          saveIconCache()
+          iconCacheDirty = false
+        end
       end
     end
     if not drained and iconRenderPending then
