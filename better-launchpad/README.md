@@ -63,7 +63,9 @@ exclusive: a folded application has no top-level row, so it appears only
 inside its folder (a typed search still finds it).
 
 - In the app grid a folder renders as a rounded tile with up to four member
-  icons (missing members get empty placeholders) and the member count.
+  icons (missing members get empty placeholders) and the member count in place
+  of the origin badge. A new folder is named after `folder.new` in the
+  translations, numbered when that name is taken.
 - Clicking it opens a subview over a scrim that covers the whole panel,
   including the search bar. The subview shows the members with the same tiles
   as the main view; clicking the scrim (outside the subview) or the header's
@@ -84,6 +86,13 @@ mode: no search field, just the stored layout with the same tiles.
   slot. Folders take part in the same drag order, and dropping an application
   on a folder adds it. The full order is written to `order.json` under the
   plugin data directory after every change.
+- The header carries a drag-mode switch. **Swap** reorders; **Folder** creates
+  folders: drop an app on another app and both go into a new folder placed at
+  the target's slot, or drop it on an existing folder to add it there. Folders
+  never nest, so dragging a folder changes nothing in folder mode.
+  (The drag source only arms on the left button and the API exposes no modifier
+  state, so "hold Shift to fold" cannot be a gesture — the switch is the
+  equivalent without a keyboard.)
 - The shell's `shell.launcher.pinned` list seeds the front of the layout the
   first time an app is seen. Pin and Unpin from the context menu move the app
   into or out of the pinned block, and the result is stored in `order.json`

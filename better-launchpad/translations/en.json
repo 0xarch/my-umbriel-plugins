@@ -100,7 +100,10 @@
     "title": "Edit layout",
     "hint": "Drag a tile onto another to reorder",
     "done": "Done",
-    "empty": "No applications to arrange yet."
+    "empty": "No applications to arrange yet.",
+    "mode_swap": "Swap",
+    "mode_folder": "Folder",
+    "hint_folder": "Drag an app onto another app to make a folder"
   },
   "folder": {
     "new": "New Folder",

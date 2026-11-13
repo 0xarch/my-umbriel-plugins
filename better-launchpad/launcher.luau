@@ -214,11 +214,13 @@ local orderRank = {}
 local order = nil
 local orderPath = nil
 local mode = "normal"
+local editDragMode = "swap"
 local lastRight = { index = nil, at = 0 }
 local forceList = false
 local resultsShown = 0
-local moreResults = false
-local renderAfterRefresh = false
+-- Frame-loop flags: a tile list is truncated, a render is owed after a refresh,
+-- or resolved icons are waiting to be drawn.
+local flags = { more = false, render = false, icons = false, apps = false }
 local folderOpen = nil
 local folderResults = {}
 
@@ -629,7 +631,26 @@ end
 -- Create a folder holding `paths` (in that order) at the position of its first
 -- member; the members' top-level rows are removed, so an application lives in
 -- exactly one place. Returns the new row.
-local function createFolderWithApps(paths, name)
+-- `anchorPath` places the folder at that row's slot (the drop target); without
+-- it the folder takes its first member's slot.
+local function createFolderWithApps(paths, name, anchorPath)
+  local function uniqueName(base, entries)
+    local used = {}
+    for _, row in ipairs(entries) do
+      if row.type == "folder" and type(row.name) == "string" then
+        used[row.name] = true
+      end
+    end
+    if not used[base] then
+      return base
+    end
+    local n = 2
+    while used[base .. " " .. tostring(n)] do
+      n = n + 1
+    end
+    return base .. " " .. tostring(n)
+  end
+
   if type(paths) ~= "table" or #paths == 0 then
     return nil
   end
@@ -645,7 +666,7 @@ local function createFolderWithApps(paths, name)
   local members = {}
   for index, row in ipairs(store.entries) do
     if row.type == "app" and wanted[row.id] then
-      if anchor == nil then
+      if row.id == anchorPath then
         anchor = index
       end
       members[#members + 1] = row.id
@@ -654,12 +675,30 @@ local function createFolderWithApps(paths, name)
   if #members == 0 then
     return nil
   end
+  if anchor == nil then
+    for index, row in ipairs(store.entries) do
+      if row.type == "app" and wanted[row.id] then
+        anchor = index
+        break
+      end
+    end
+  end
+  -- Members follow the order the caller gave, not the store order.
+  local ordered = {}
+  local memberSet = {}
+  for _, path in ipairs(paths) do
+    if memberSet[path] == nil and wanted[path] then
+      memberSet[path] = true
+      ordered[#ordered + 1] = path
+    end
+  end
 
   local folder = {
     type = "folder",
     id = nextFolderId(store.entries),
-    name = type(name) == "string" and name ~= "" and name or T("folder.new", "New Folder"),
-    entries = members,
+    name = type(name) == "string" and name ~= "" and name
+      or uniqueName(T("folder.new", "New Folder"), store.entries),
+    entries = ordered,
   }
   for index = #store.entries, 1, -1 do
     local row = store.entries[index]
@@ -808,7 +847,6 @@ end
 -- Desktop files are parsed by a helper process: a large entry can take longer
 -- than the 25 ms callback budget when parsed in Luau.
 local APP_SCAN_INTERVAL = 30
-local appRefreshPending = false
 
 local function finishAppScan(list)
   apps = list
@@ -817,7 +855,7 @@ local function finishAppScan(list)
   syncOrder()
   resolvePinned()
   if isOpen then
-    appRefreshPending = true
+    flags.apps = true
     panel.setNeedsFrameTick(true)
   end
 end
@@ -2025,7 +2063,7 @@ refresh = function()
     selected = #results
   end
   resultsShown = RESULTS_PER_FRAME
-  moreResults = false
+  flags.more = false
 end
 
 -- ── rendering ───────────────────────────────────────────────────────────────
@@ -2051,7 +2089,6 @@ local ICON_LOOKUP_BUDGET_MS = 10
 local ICONS_PER_TICK = 12
 local iconQueue = {}
 local iconQueued = {}
-local iconRenderPending = false
 local iconStore = { loaded = false, dirty = false }
 
 local function iconCacheFile()
@@ -2446,7 +2483,7 @@ end
 resultNodesFrom = function(list, keyPrefix)
   local nodes = {}
   local count = math.min(resultsShown, #list)
-  moreResults = count < #list
+  flags.more = count < #list
   if isGrid() then
     local row = {}
     for index = 1, count do
@@ -2517,8 +2554,35 @@ end
 -- the stored layout in five-column form. Rows are drag sources dropped onto
 -- neighbouring tiles; folders and other row types will slot in here later.
 local DRAG_TYPE = "better-launchpad-app"
+local EDIT_MODES = { "swap", "folder" }
 
+-- The plugin API cannot read modifier state (a drag source only ever arms on
+-- the left button, and capture_keys would have to consume Shift globally), so
+-- the "hold a modifier to fold instead of swap" gesture becomes an explicit
+-- drag mode in the editor header.
 local function editHeader()
+  local function modeButton(id, label, glyph)
+    return ui.button({
+      key = "emode-" .. id,
+      text = label,
+      glyph = glyph,
+      fontSize = 11,
+      glyphSize = 14,
+      variant = "ghost",
+      selected = editDragMode == id,
+      height = 28,
+      onClick = function()
+        if editDragMode == id then
+          return
+        end
+        editDragMode = id
+        render()
+      end,
+    })
+  end
+  local hint = editDragMode == "folder"
+      and T("edit.hint_folder", "Drag an app onto another app to make a folder")
+      or T("edit.hint", "Drag a tile onto another to reorder")
   return ui.row({
     height = 46,
     gap = 8,
@@ -2539,11 +2603,21 @@ local function editHeader()
         maxLines = 1,
       }),
       ui.label({
-        text = T("edit.hint", "Drag a tile onto another to reorder"),
+        text = hint,
         fontSize = 11,
         color = "on_surface_variant",
         maxLines = 1,
       }),
+    }),
+    ui.row({
+      gap = 2,
+      padding = 2,
+      align = "center",
+      fill = "surface_container_high",
+      radius = 9,
+    }, {
+      modeButton("swap", T("edit.mode_swap", "Swap"), "arrows-move"),
+      modeButton("folder", T("edit.mode_folder", "Folder"), FOLDER_GLYPH),
     }),
     ui.button({
       text = T("edit.done", "Done"),
@@ -2554,20 +2628,25 @@ local function editHeader()
 end
 
 local function editTile(row, position)
-  local entry = findAppByPath(row.id)
-  if entry == nil then
-    return nil
+  local card = nil
+  if row.type == "folder" then
+    card = folderCard(folderResult(row), false, "ecard-" .. position)
+  else
+    local entry = findAppByPath(row.id)
+    if entry == nil then
+      return nil
+    end
+    local result = {
+      provider = "Applications",
+      title = entry.name,
+      iconName = entry.icon ~= "" and entry.icon or "application-x-executable",
+      origin = entry.origin,
+      pinned = row.pinned == true,
+    }
+    -- The drag source is a horizontal flex, so the card needs flexGrow to fill
+    -- the cell; without it the tile hugs its content and the name never wraps.
+    card = tileCard(result, false, "ecard-" .. position, row.pinned == true, true)
   end
-  local result = {
-    provider = "Applications",
-    title = entry.name,
-    iconName = entry.icon ~= "" and entry.icon or "application-x-executable",
-    origin = entry.origin,
-    pinned = row.pinned == true,
-  }
-  -- The drag source is a horizontal flex, so the card needs flexGrow to fill
-  -- the cell; without it the tile hugs its content and the name never wraps.
-  local card = tileCard(result, false, "ecard-" .. position, row.pinned == true, true)
   -- The wrappers stay invisible: only the card paints, so an editor tile looks
   -- exactly like a normal one. The zone is a column so the source stretches
   -- across the cell, and the source grows so the card fills it.
@@ -2596,14 +2675,15 @@ local function editNodes()
   local nodes = {}
   local row = {}
   for position, entry in ipairs(loadOrder().entries) do
-    if entry.type == "app" then
-      local node = editTile(entry, position)
-      if node ~= nil then
-        row[#row + 1] = node
-        if #row == 5 then
-          nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
-          row = {}
-        end
+    local node = nil
+    if entry.type == "folder" or entry.type == "app" then
+      node = editTile(entry, position)
+    end
+    if node ~= nil then
+      row[#row + 1] = node
+      if #row == 5 then
+        nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
+        row = {}
       end
     end
   end
@@ -2664,6 +2744,7 @@ enterEditMode = function()
   end
   closeFolder()
   mode = "edit"
+  editDragMode = "swap"
   hoverIndex = nil
   keyboardFocus = true
   lastRight.index = nil
@@ -2687,6 +2768,39 @@ end
 
 function onReorderDrop(payload, value)
   if mode ~= "edit" then
+    return
+  end
+  local target = tonumber(value)
+  local store = loadOrder()
+  local row = target ~= nil and store.entries[target] or nil
+  local from = orderRowIndex(payload)
+  if row == nil or from == nil or from == target then
+    return
+  end
+  local dragged = store.entries[from]
+  if editDragMode == "folder" then
+    -- Folders never nest: only an application can be folded, and the target is
+    -- either another application (a new folder) or an existing folder.
+    if dragged.type ~= "app" then
+      return
+    end
+    if row.type == "folder" then
+      if addToFolder(row.id, payload) then
+        render()
+      end
+    elseif row.type == "app" then
+      local folder = createFolderWithApps({ row.id, payload }, nil, row.id)
+      if folder ~= nil then
+        render()
+      end
+    end
+    return
+  end
+  -- Swap mode: reordering, but dropping an application on a folder folds it in.
+  if row.type == "folder" and dragged.type == "app" then
+    if addToFolder(row.id, payload) then
+      render()
+    end
     return
   end
   moveOrderRow(payload, value)
@@ -2765,7 +2879,7 @@ function render()
     return
   end
 
-  moreResults = false
+  flags.more = false
 
   local root = nil
   if mode == "edit" then
@@ -2774,13 +2888,17 @@ function render()
     root = renderNormal()
   end
   if folderOpen ~= nil and mode == "normal" then
+    -- The content keeps the panel's height so the mask, which sits one panel
+    -- height below it, composites exactly over the whole panel after its
+    -- translateY. The wrapper clips the overflow, so the measured height stays
+    -- at PANEL_HEIGHT.
     root = ui.column({ key = "panel-root", height = PANEL_HEIGHT, gap = 0, clip = true }, {
-      ui.column({ flexGrow = 1, gap = 10 }, { root }),
+      ui.column({ height = PANEL_HEIGHT, gap = 10 }, { root }),
       folderMask(),
     })
   end
   panel.render(root)
-  if #iconQueue > 0 or moreResults or iconRenderPending then
+  if #iconQueue > 0 or flags.more or flags.icons then
     panel.setNeedsFrameTick(true)
   end
 end
@@ -3167,20 +3285,20 @@ end
 function onFrameTick(_deltaMs)
   local needsRender = false
   local refreshTick = false
-  if appRefreshPending then
-    appRefreshPending = false
+  if flags.apps then
+    flags.apps = false
     refresh()
     -- Score and rebuild are both heavy; give each its own frame so the pair
     -- never crowds the 25 ms budget on a cold machine.
-    renderAfterRefresh = true
+    flags.render = true
     refreshTick = true
   end
   if not refreshTick then
-    if renderAfterRefresh then
-      renderAfterRefresh = false
+    if flags.render then
+      flags.render = false
       needsRender = true
     end
-    if moreResults then
+    if flags.more then
       resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
       needsRender = true
     end
@@ -3211,7 +3329,7 @@ function onFrameTick(_deltaMs)
         end
       end
       if resolved > 0 then
-        iconRenderPending = true
+        flags.icons = true
       end
       drained = true
       if #iconQueue == 0 then
@@ -3223,15 +3341,15 @@ function onFrameTick(_deltaMs)
         end
       end
     end
-    if not drained and iconRenderPending then
-      iconRenderPending = false
+    if not drained and flags.icons then
+      flags.icons = false
       needsRender = true
     end
   end
-  if needsRender or #iconQueue > 0 or iconRenderPending then
+  if needsRender or #iconQueue > 0 or flags.icons then
     render()
   end
-  if #iconQueue == 0 and not moreResults and not iconRenderPending and not renderAfterRefresh then
+  if #iconQueue == 0 and not flags.more and not flags.icons and not flags.render then
     panel.setNeedsFrameTick(false)
   end
 end
@@ -3272,7 +3390,7 @@ function onClose()
   folderOpen = nil
   folderResults = {}
   lastRight.index = nil
-  appRefreshPending = false
+  flags.apps = false
   calc.seq = calc.seq + 1
   panel.setNeedsFrameTick(false)
 end
