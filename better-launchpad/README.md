@@ -180,7 +180,10 @@ directory, so uninstalling the plugin does not disturb the shell's history.
 - The plugin API has no transition or animation props, so the panel animates
   itself from `onFrameTick`: it fades and rises in over 180 ms on open (the host's
   own reveal runs before the script's first tree exists, so it is not visible
-  here), and the folder subview fades and scales in and out over 160 ms. Progress
+  here), and the folder subview's scrim fades in and out over 160 ms. The card
+  itself is never scaled or translated: a transformed clipped flex leaves the
+  visual bounds disagreeing with its layout box, which shows up as asymmetric
+  gaps at the panel edges. Progress
   is measured against `noctalia.nowMs`, not the frame delta, because the first
   delta after an idle surface can span the whole gap and would skip the fade in
   one step; each step is also capped at ~2 frames so a single slow frame (the

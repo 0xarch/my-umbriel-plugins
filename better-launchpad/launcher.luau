@@ -3369,13 +3369,9 @@ local function folderMask()
     }),
     body,
   })
-  -- The subview pops in (and back out) while the scrim fades with it: the
-  -- group opacity on the mask carries the whole overlay, the scale/offset only
-  -- the card, so the two never fight each other.
-  if progress < 1 then
-    subview.props.scale = 0.94 + 0.06 * progress
-    subview.props.translateY = (1 - progress) * 14
-  end
+  -- Animate only group opacity here. Transforming a clipped flex card makes
+  -- its visual bounds disagree with the layout bounds, leaving asymmetric gaps
+  -- at the panel edges while it opens or closes.
   local mask = ui.column({
     key = "folder-mask",
     height = PANEL_HEIGHT,
