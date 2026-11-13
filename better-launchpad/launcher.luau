@@ -225,6 +225,13 @@ local mode = "normal"
 local lastRightIndex = nil
 local lastRightAt = 0
 local forceList = false
+local resultsShown = 0
+local moreResults = false
+
+-- Building the full tree for a large catalog overruns the 25 ms callback
+-- budget, so tiles appear in chunks: each frame adds RESULTS_PER_FRAME more
+-- results until the whole list is in the scroll.
+local RESULTS_PER_FRAME = 10
 
 -- A second right-click on the same app within this window enters edit mode.
 local RIGHT_CLICK_WINDOW = 2
@@ -1776,6 +1783,8 @@ refresh = function()
   elseif selected > #results then
     selected = #results
   end
+  resultsShown = RESULTS_PER_FRAME
+  moreResults = false
 end
 
 -- ── rendering ───────────────────────────────────────────────────────────────
@@ -2047,10 +2056,12 @@ end
 
 local function resultNodes()
   local nodes = {}
+  local count = math.min(resultsShown, #results)
+  moreResults = count < #results
   if isGrid() then
     local row = {}
-    for index, result in ipairs(results) do
-      row[#row + 1] = tile(result, index)
+    for index = 1, count do
+      row[#row + 1] = tile(results[index], index)
       if #row == 5 then
         nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
         row = {}
@@ -2063,8 +2074,8 @@ local function resultNodes()
       nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
     end
   else
-    for index, result in ipairs(results) do
-      nodes[#nodes + 1] = listRow(result, index)
+    for index = 1, count do
+      nodes[#nodes + 1] = listRow(results[index], index)
     end
   end
   return nodes
@@ -2271,13 +2282,14 @@ function render()
 
   iconBudget = ICON_LOOKUPS_PER_RENDER
   iconPending = false
+  moreResults = false
 
   if mode == "edit" then
     renderEdit()
   else
     renderNormal()
   end
-  if iconPending then
+  if iconPending or moreResults then
     panel.setNeedsFrameTick(true)
   end
 end
@@ -2579,6 +2591,9 @@ local function moveSelection(delta)
   if nextIndex ~= selected then
     selected = nextIndex
   end
+  if selected > resultsShown then
+    resultsShown = math.min(selected + RESULTS_PER_FRAME, #results)
+  end
   hoverIndex = nil
   keyboardFocus = true
   render()
@@ -2647,10 +2662,14 @@ function onFrameTick(_deltaMs)
     appRefreshPending = false
     refresh()
   end
+  if moreResults then
+    resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
+    needsRender = true
+  end
   if needsRender or iconPending then
     render()
   end
-  if not appRefreshPending and not iconPending then
+  if not appRefreshPending and not iconPending and not moreResults then
     panel.setNeedsFrameTick(false)
   end
 end
