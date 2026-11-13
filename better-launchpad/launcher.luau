@@ -1954,7 +1954,7 @@ local function isFocused(index)
   return keyboardFocus and selected == index
 end
 
-local TILE_HEIGHT = 104
+local TILE_HEIGHT = 108
 local ROW_HEIGHT = 54
 
 -- Right-click handling. Only a button receives right-clicks in a panel, so each
@@ -2001,10 +2001,10 @@ end
 -- 30px row that clips instead of stretching the column.
 local TILE_BADGE_BAND = 12
 local TILE_ICON_BAND = 42
-local TILE_NAME_BAND = 30
+local TILE_NAME_BAND = 34
 local TILE_ORIGIN_BAND = 12
 
-local function tileCard(result, focused, key, pinned)
+local function tileCard(result, focused, key, pinned, grow)
   local iconWidth, iconHeight = 40, 40
   if result.imagePath ~= nil then
     iconWidth, iconHeight = 74, 40
@@ -2025,7 +2025,7 @@ local function tileCard(result, focused, key, pinned)
     ui.row({ height = TILE_ICON_BAND, justify = "center", align = "center" }, {
       iconNode(result, iconWidth, iconHeight),
     }),
-    ui.column({ height = TILE_NAME_BAND, align = "center", justify = "center", clip = true }, {
+    ui.column({ height = TILE_NAME_BAND, align = "center", justify = "start", clip = true }, {
       ui.label({
         text = result.title,
         fontSize = 11,
@@ -2047,6 +2047,7 @@ local function tileCard(result, focused, key, pinned)
     justify = "start",
     radius = 10,
     fill = focused and "primary/0.16" or "surface/0",
+    flexGrow = grow == true and 1 or nil,
   }, children)
 end
 
@@ -2230,7 +2231,9 @@ local function editTile(row, position)
     origin = entry.origin,
     pinned = row.pinned == true,
   }
-  local card = tileCard(result, false, "ecard-" .. position, row.pinned == true)
+  -- The drag source is a horizontal flex, so the card needs flexGrow to fill
+  -- the cell; without it the tile hugs its content and the name never wraps.
+  local card = tileCard(result, false, "ecard-" .. position, row.pinned == true, true)
   -- The wrappers stay invisible: only the card paints, so an editor tile looks
   -- exactly like a normal one. The zone is a column so the source stretches
   -- across the cell, and the source grows so the card fills it.
