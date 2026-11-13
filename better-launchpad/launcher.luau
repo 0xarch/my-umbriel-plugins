@@ -2741,8 +2741,12 @@ function onFrameTick(_deltaMs)
       local started = os.clock()
       local resolved = 0
       while #iconQueue > 0 and resolved < ICONS_PER_TICK do
-        local job = table.remove(iconQueue, 1)
+        -- Peek, resolve, then drop: if the lookup blows the callback budget the
+        -- unwound frame never runs the removal, so the head job is retried on
+        -- the next tick (the host's icon cache answers the repeat quickly).
+        local job = iconQueue[1]
         local path = noctalia.appIconPath(job.name, job.size)
+        table.remove(iconQueue, 1)
         if type(path) == "string" and path ~= "" then
           iconCache[job.key] = path
           iconCacheDirty = true
