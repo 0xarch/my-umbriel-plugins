@@ -233,6 +233,70 @@ local flags = { more = false, render = false, icons = false, apps = false }
 local folderOpen = nil
 local folderResults = {}
 
+-- The plugin API has no transition/animation props, so the panel animates
+-- itself: onFrameTick advances a normalized progress and each step re-renders
+-- with a new opacity/offset. The host's own open reveal runs before the script
+-- has a tree to show, so without this the panel simply appears.
+local anim = {
+  open = 1,
+  openMs = 150,
+  folder = 0,
+  folderMs = 130,
+  folderTarget = 0,
+}
+
+anim.ease = function(t)
+  local inv = 1 - t
+  return 1 - inv * inv * inv
+end
+
+-- Advance both animations by one frame. Returns true when the tree must be
+-- repainted; the caller sets flags.render so the frame loop keeps running.
+anim.step = function(deltaMs)
+  local delta = tonumber(deltaMs) or 16
+  if delta < 0 then
+    delta = 0
+  elseif delta > 100 then
+    delta = 100
+  end
+  local changed = false
+  if anim.open < 1 then
+    anim.open = math.min(1, anim.open + delta / anim.openMs)
+    changed = true
+  end
+  if anim.folder ~= anim.folderTarget then
+    local step = delta / anim.folderMs
+    if anim.folder < anim.folderTarget then
+      anim.folder = math.min(anim.folderTarget, anim.folder + step)
+    else
+      anim.folder = math.max(anim.folderTarget, anim.folder - step)
+    end
+    changed = true
+  end
+  if anim.folder == 0 and anim.folderTarget == 0 and folderOpen ~= nil then
+    -- The close animation reached zero: drop the subview from the tree.
+    folderOpen = nil
+    folderResults = {}
+    changed = true
+  end
+  return changed
+end
+
+-- True while a frame would still change the picture. The frame loop must stay
+-- alive for this even when no other work is queued.
+anim.active = function()
+  return anim.open < 1 or anim.folder ~= anim.folderTarget
+      or (anim.folderTarget == 0 and folderOpen ~= nil)
+end
+
+-- Leaving the normal view (edit mode, panel close) must not wait for the fade.
+anim.resetFolder = function()
+  folderOpen = nil
+  folderResults = {}
+  anim.folder = 0
+  anim.folderTarget = 0
+end
+
 -- Building the full tree for a large catalog overruns the 25 ms callback
 -- budget, so tiles appear in chunks: each frame adds RESULTS_PER_FRAME more
 -- results until the whole list is in the scroll.
@@ -3097,32 +3161,38 @@ openFolder = function(row)
   end
   folderOpen = row
   folderResults = buildFolderResults(row)
+  -- Reopening mid-close continues from the current progress instead of
+  -- snapping the subview back to invisible.
+  anim.folderTarget = 1
   hoverIndex = nil
   hoverFolder = false
   keyboardFocus = false
   selected = 1
   inputRev = inputRev + 1
   render()
+  panel.setNeedsFrameTick(true)
 end
 
 closeFolder = function()
-  if folderOpen == nil then
+  if folderOpen == nil or anim.folderTarget == 0 then
     return
   end
-  folderOpen = nil
-  folderResults = {}
+  -- Keep the subview in the tree while it fades; the frame tick drops it once
+  -- the progress reaches zero, and the mask swallows clicks meanwhile.
+  anim.folderTarget = 0
   hoverIndex = nil
   hoverFolder = false
   keyboardFocus = true
   inputRev = inputRev + 1
   render()
+  panel.setNeedsFrameTick(true)
 end
 
 enterEditMode = function()
   if mode == "edit" or not isOpen then
     return
   end
-  closeFolder()
+  anim.resetFolder()
   mode = "edit"
   editState.dragMode = "swap"
   editState.shown = RESULTS_PER_FRAME
@@ -3221,6 +3291,7 @@ end
 local PANEL_HEIGHT = 500
 
 local function folderMask()
+  local progress = anim.ease(anim.folder)
   local body = nil
   if #folderResults == 0 then
     body = ui.label({
@@ -3271,7 +3342,14 @@ local function folderMask()
     }),
     body,
   })
-  return ui.column({
+  -- The subview pops in (and back out) while the scrim fades with it: the
+  -- group opacity on the mask carries the whole overlay, the scale/offset only
+  -- the card, so the two never fight each other.
+  if progress < 1 then
+    subview.props.scale = 0.94 + 0.06 * progress
+    subview.props.translateY = (1 - progress) * 14
+  end
+  local mask = ui.column({
     key = "folder-mask",
     height = PANEL_HEIGHT,
     translateY = -PANEL_HEIGHT,
@@ -3281,6 +3359,10 @@ local function folderMask()
     clip = true,
     onClick = function() closeFolder() end,
   }, { subview })
+  if progress < 1 then
+    mask.props.opacity = progress
+  end
+  return mask
 end
 
 function render()
@@ -3295,6 +3377,13 @@ function render()
     root = renderEdit()
   else
     root = renderNormal()
+  end
+  -- Opening: fade the content in and let it rise a few pixels. The mask stays
+  -- outside this node so the folder subview keeps covering the whole panel.
+  local fade = anim.ease(anim.open)
+  if fade < 1 then
+    root.props.opacity = fade
+    root.props.translateY = (1 - fade) * 10
   end
   if folderOpen ~= nil and mode == "normal" then
     -- The content keeps the panel's height so the mask, which sits one panel
@@ -3706,9 +3795,12 @@ function onKey(chord, pressed)
   end
 end
 
-function onFrameTick(_deltaMs)
+function onFrameTick(deltaMs)
   local needsRender = false
   local refreshTick = false
+  if anim.step(deltaMs) then
+    flags.render = true
+  end
   if flags.apps then
     flags.apps = false
     -- Score and rebuild are both heavy; give each its own frame so the pair
@@ -3799,7 +3891,8 @@ function onFrameTick(_deltaMs)
       return
     end
   end
-  if #iconQueue == 0 and not flags.more and not flags.icons and not flags.render then
+  if #iconQueue == 0 and not flags.more and not flags.icons and not flags.render
+      and not anim.active() then
     panel.setNeedsFrameTick(false)
   end
 end
@@ -3815,8 +3908,8 @@ function onOpen(context)
   mode = "normal"
   editState.expanded = {}
   editState.rename = nil
-  folderOpen = nil
-  folderResults = {}
+  anim.resetFolder()
+  anim.open = 0
   lastRight.index = nil
   query = type(context) == "string" and context or ""
   providerId = "" -- force a provider reset for the new session
@@ -3831,6 +3924,8 @@ function onOpen(context)
   focusInput()
   refresh()
   render()
+  -- The open animation needs frames even when nothing else is pending.
+  panel.setNeedsFrameTick(true)
   refreshWindows(false)
 end
 
@@ -3839,8 +3934,8 @@ function onClose()
   hoverIndex = nil
   keyboardFocus = true
   mode = "normal"
-  folderOpen = nil
-  folderResults = {}
+  anim.resetFolder()
+  anim.open = 1
   lastRight.index = nil
   flags.apps = false
   calc.seq = calc.seq + 1
