@@ -1675,10 +1675,7 @@ local function isFocused(index)
 end
 
 local function tile(result, index)
-  local fill = nil
-  if isFocused(index) then
-    fill = "primary/0.16"
-  end
+  local fill = isFocused(index) and "primary/0.16" or "surface/0"
   local iconWidth, iconHeight = 40, 40
   if result.imagePath ~= nil then
     iconWidth, iconHeight = 74, 40
@@ -1696,7 +1693,9 @@ local function tile(result, index)
     ui.row({ height = 12, justify = "end", align = "center" }, {
       pinBadge or ui.spacer({ flexGrow = 1 }),
     }),
-    iconNode(result, iconWidth, iconHeight),
+    ui.row({ height = 40, justify = "center", align = "center" }, {
+      iconNode(result, iconWidth, iconHeight),
+    }),
     ui.label({
       text = result.title,
       fontSize = 11,
@@ -1715,7 +1714,7 @@ local function tile(result, index)
     height = 104,
     gap = 2,
     padding = 4,
-    align = "center",
+    align = "stretch",
     justify = "center",
     radius = 10,
     fill = fill,
@@ -1726,10 +1725,7 @@ local function tile(result, index)
 end
 
 local function listRow(result, index)
-  local fill = nil
-  if isFocused(index) then
-    fill = "primary/0.16"
-  end
+  local fill = isFocused(index) and "primary/0.16" or "surface/0"
   local text = ui.column({ gap = 1, flexGrow = 1, align = "start" }, {
     ui.label({
       text = result.title,
