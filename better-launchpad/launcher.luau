@@ -1804,6 +1804,9 @@ end
 -- draws every icon immediately.
 local ICON_CACHE_VERSION = 1
 local ICON_LOOKUP_BUDGET_MS = 10
+-- Swapping an image path makes the host rebuild that image control, so the
+-- resolved set is drawn in small groups to keep each frame light.
+local ICONS_PER_TICK = 12
 local iconQueue = {}
 local iconQueued = {}
 local iconRenderPending = false
@@ -2733,19 +2736,23 @@ function onFrameTick(_deltaMs)
       -- Resolved icons are drawn on a later frame so a slow lookup never stacks
       -- with a rebuild.
       local started = os.clock()
-      while #iconQueue > 0 do
+      local resolved = 0
+      while #iconQueue > 0 and resolved < ICONS_PER_TICK do
         local job = table.remove(iconQueue, 1)
         local path = noctalia.appIconPath(job.name, job.size)
         if type(path) == "string" and path ~= "" then
           iconCache[job.key] = path
           iconCacheDirty = true
-          iconRenderPending = true
+          resolved = resolved + 1
         else
           iconCache[job.key] = false
         end
         if (os.clock() - started) * 1000 >= ICON_LOOKUP_BUDGET_MS then
           break
         end
+      end
+      if resolved > 0 then
+        iconRenderPending = true
       end
       drained = true
       if #iconQueue == 0 then
