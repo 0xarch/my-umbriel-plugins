@@ -178,10 +178,13 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   transparent button stretched over it with the compositing `translateY` prop.
   That button is what receives clicks, hover, and right-clicks.
 - The plugin API has no transition or animation props, so the panel animates
-  itself from `onFrameTick`: it fades and rises in on open (the host's own reveal
-  runs before the script's first tree exists, so it is not visible here), and the
-  folder subview fades and scales in and out. Each step is a normal render, and
-  the frame loop stays alive until the progress reaches its target.
+  itself from `onFrameTick`: it fades and rises in over 180 ms on open (the host's
+  own reveal runs before the script's first tree exists, so it is not visible
+  here), and the folder subview fades and scales in and out over 160 ms. Progress
+  is measured against `noctalia.nowMs`, not the frame delta, because the first
+  delta after an idle surface can span the whole gap and would skip the fade in
+  one step. Each step is a normal render, and the frame loop stays alive until the
+  progress reaches its target.
 - The folder subview reuses those tiles, so its overlay keys repeat the grid's.
   Pointer focus is scoped to the list that owns the hover: a hover inside the
   subview never highlights the card at the same index under the scrim.

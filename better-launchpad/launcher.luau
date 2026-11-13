@@ -237,12 +237,18 @@ local folderResults = {}
 -- itself: onFrameTick advances a normalized progress and each step re-renders
 -- with a new opacity/offset. The host's own open reveal runs before the script
 -- has a tree to show, so without this the panel simply appears.
+-- Timing comes from noctalia.nowMs, not from the frame delta: the first delta
+-- after an idle surface can span the whole gap since the last frame, which would
+-- finish the animation in one step and make it invisible.
 local anim = {
   open = 1,
-  openMs = 150,
+  openMs = 180,
+  openAt = nil,
   folder = 0,
-  folderMs = 130,
+  folderMs = 160,
   folderTarget = 0,
+  folderAt = nil,
+  folderFrom = 0,
 }
 
 anim.ease = function(t)
@@ -250,28 +256,37 @@ anim.ease = function(t)
   return 1 - inv * inv * inv
 end
 
--- Advance both animations by one frame. Returns true when the tree must be
--- repainted; the caller sets flags.render so the frame loop keeps running.
-anim.step = function(deltaMs)
-  local delta = tonumber(deltaMs) or 16
-  if delta < 0 then
-    delta = 0
-  elseif delta > 100 then
-    delta = 100
-  end
+-- Advance both animations to the current wall clock. Returns true when the tree
+-- must be repainted; the caller sets flags.render so the frame loop keeps going.
+anim.step = function()
+  local now = noctalia.nowMs()
   local changed = false
   if anim.open < 1 then
-    anim.open = math.min(1, anim.open + delta / anim.openMs)
-    changed = true
+    if anim.openAt == nil then
+      -- The clock starts on the first frame after the render that showed the
+      -- tree, so a late first frame cannot skip the animation.
+      anim.openAt = now
+    else
+      anim.open = math.min(1, math.max(0, (now - anim.openAt) / anim.openMs))
+      if anim.open >= 1 then
+        anim.openAt = nil
+      end
+      changed = true
+    end
   end
   if anim.folder ~= anim.folderTarget then
-    local step = delta / anim.folderMs
-    if anim.folder < anim.folderTarget then
-      anim.folder = math.min(anim.folderTarget, anim.folder + step)
+    if anim.folderAt == nil then
+      anim.folderAt = now
+      anim.folderFrom = anim.folder
     else
-      anim.folder = math.max(anim.folderTarget, anim.folder - step)
+      local t = math.min(1, math.max(0, (now - anim.folderAt) / anim.folderMs))
+      anim.folder = anim.folderFrom + (anim.folderTarget - anim.folderFrom) * t
+      if t >= 1 then
+        anim.folder = anim.folderTarget
+        anim.folderAt = nil
+      end
+      changed = true
     end
-    changed = true
   end
   if anim.folder == 0 and anim.folderTarget == 0 and folderOpen ~= nil then
     -- The close animation reached zero: drop the subview from the tree.
@@ -295,6 +310,7 @@ anim.resetFolder = function()
   folderResults = {}
   anim.folder = 0
   anim.folderTarget = 0
+  anim.folderAt = nil
 end
 
 -- Building the full tree for a large catalog overruns the 25 ms callback
@@ -3164,6 +3180,7 @@ openFolder = function(row)
   -- Reopening mid-close continues from the current progress instead of
   -- snapping the subview back to invisible.
   anim.folderTarget = 1
+  anim.folderAt = nil
   hoverIndex = nil
   hoverFolder = false
   keyboardFocus = false
@@ -3180,6 +3197,7 @@ closeFolder = function()
   -- Keep the subview in the tree while it fades; the frame tick drops it once
   -- the progress reaches zero, and the mask swallows clicks meanwhile.
   anim.folderTarget = 0
+  anim.folderAt = nil
   hoverIndex = nil
   hoverFolder = false
   keyboardFocus = true
@@ -3798,7 +3816,7 @@ end
 function onFrameTick(deltaMs)
   local needsRender = false
   local refreshTick = false
-  if anim.step(deltaMs) then
+  if anim.step() then
     flags.render = true
   end
   if flags.apps then
