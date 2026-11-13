@@ -1640,7 +1640,11 @@ local function buildResults()
   if providerId == "Applications" then
     list = queryApplications(providerQuery, providerQuery ~= "")
     list = applyCategoryFilter(list)
-    list = trimResults(list, 50)
+    -- The empty query is the app drawer: show every application. A typed query
+    -- stays capped so a very broad match does not build a huge tree.
+    if providerQuery ~= "" then
+      list = trimResults(list, 50)
+    end
 
     if providerQuery ~= "" then
       for _, id in ipairs(PROVIDER_ORDER) do
@@ -1929,6 +1933,14 @@ local function resultOverlay(result, index, height)
   })
 end
 
+-- Fixed-height bands keep the icon in the same place whether the name wraps
+-- to one line or two: the label is measured by its text, so it lives inside a
+-- 30px row that clips instead of stretching the column.
+local TILE_BADGE_BAND = 12
+local TILE_ICON_BAND = 42
+local TILE_NAME_BAND = 30
+local TILE_ORIGIN_BAND = 12
+
 local function tileCard(result, focused, key, pinned)
   local iconWidth, iconHeight = 40, 40
   if result.imagePath ~= nil then
@@ -1944,31 +1956,32 @@ local function tileCard(result, focused, key, pinned)
   local badge = originBadge(result.origin, 12)
 
   local children = {
-    ui.row({ height = 12, justify = "end", align = "center" }, {
+    ui.row({ height = TILE_BADGE_BAND, justify = "end", align = "center" }, {
       pinBadge or ui.spacer({ flexGrow = 1 }),
     }),
-    ui.row({ height = 40, justify = "center", align = "center" }, {
+    ui.row({ height = TILE_ICON_BAND, justify = "center", align = "center" }, {
       iconNode(result, iconWidth, iconHeight),
     }),
-    ui.label({
-      text = result.title,
-      fontSize = 11,
-      maxLines = 2,
-      textAlign = "center",
-      color = focused and "on_surface" or "on_surface_variant",
-      height = 24,
+    ui.row({ height = TILE_NAME_BAND, align = "center", justify = "center", clip = true }, {
+      ui.label({
+        text = result.title,
+        fontSize = 11,
+        maxLines = 2,
+        textAlign = "center",
+        color = focused and "on_surface" or "on_surface_variant",
+      }),
     }),
-    ui.row({ height = 12, justify = "end", align = "center" }, {
+    ui.row({ height = TILE_ORIGIN_BAND, justify = "end", align = "center" }, {
       badge or ui.spacer({ flexGrow = 1 }),
     }),
   }
   return ui.column({
     key = key,
     height = TILE_HEIGHT,
-    gap = 2,
+    gap = 0,
     padding = 4,
     align = "stretch",
-    justify = "center",
+    justify = "start",
     radius = 10,
     fill = focused and "primary/0.16" or "surface/0",
   }, children)
