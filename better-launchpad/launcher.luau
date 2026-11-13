@@ -1805,6 +1805,7 @@ local ICON_CACHE_VERSION = 1
 local ICON_LOOKUP_BUDGET_MS = 10
 local iconQueue = {}
 local iconQueued = {}
+local iconRenderPending = false
 local iconCacheLoaded = false
 local iconCacheDirty = false
 
@@ -2337,7 +2338,7 @@ function render()
   else
     renderNormal()
   end
-  if #iconQueue > 0 or moreResults then
+  if #iconQueue > 0 or moreResults or iconRenderPending then
     panel.setNeedsFrameTick(true)
   end
 end
@@ -2714,18 +2715,20 @@ function onFrameTick(_deltaMs)
     resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
     needsRender = true
   end
+  local drained = false
   if not needsRender and #iconQueue > 0 then
     -- A frame either builds the tree or resolves icons: chunk and refresh
     -- frames skip the queue, quiet frames spend a small time budget on it.
+    -- Resolved icons are drawn on a later frame so a slow lookup never stacks
+    -- with a rebuild.
     local started = os.clock()
-    local resolved = false
     while #iconQueue > 0 do
       local job = table.remove(iconQueue, 1)
       local path = noctalia.appIconPath(job.name, job.size)
       if type(path) == "string" and path ~= "" then
         iconCache[job.key] = path
         iconCacheDirty = true
-        resolved = true
+        iconRenderPending = true
       else
         iconCache[job.key] = false
       end
@@ -2733,16 +2736,20 @@ function onFrameTick(_deltaMs)
         break
       end
     end
-    needsRender = needsRender or resolved
+    drained = true
     if #iconQueue == 0 and iconCacheDirty then
       saveIconCache()
       iconCacheDirty = false
     end
   end
-  if needsRender or #iconQueue > 0 then
+  if not drained and iconRenderPending then
+    iconRenderPending = false
+    needsRender = true
+  end
+  if needsRender or #iconQueue > 0 or iconRenderPending then
     render()
   end
-  if not appRefreshPending and #iconQueue == 0 and not moreResults then
+  if not appRefreshPending and #iconQueue == 0 and not moreResults and not iconRenderPending then
     panel.setNeedsFrameTick(false)
   end
 end
