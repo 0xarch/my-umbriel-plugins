@@ -380,60 +380,6 @@ end
 
 -- ── desktop entries ─────────────────────────────────────────────────────────
 
-local function decodeDesktopValue(value)
-  local out = {}
-  local i = 1
-  while i <= #value do
-    local ch = value:sub(i, i)
-    if ch == "\\" and i < #value then
-      local nextCh = value:sub(i + 1, i + 1)
-      if nextCh == "s" then
-        out[#out + 1] = " "
-      elseif nextCh == "n" then
-        out[#out + 1] = "\n"
-      elseif nextCh == "t" then
-        out[#out + 1] = "\t"
-      elseif nextCh == "r" then
-        out[#out + 1] = "\r"
-      elseif nextCh == "\\" then
-        out[#out + 1] = "\\"
-      else
-        out[#out + 1] = nextCh
-      end
-      i = i + 2
-    else
-      out[#out + 1] = ch
-      i = i + 1
-    end
-  end
-  return table.concat(out)
-end
-
-local function parseDesktopBool(value)
-  local v = lower(trim(value))
-  return v == "true" or v == "1" or v == "yes"
-end
-
-local function detectOrigin(path)
-  local normalized = path:gsub("\\", "/")
-  if normalized:find("/flatpak/", 1, true) and normalized:find("/exports/share/applications/", 1, true) then
-    return "Flatpak"
-  end
-  if normalized:find("/snap/", 1, true) or normalized:find("/snapd/desktop/applications/", 1, true) then
-    return "Snap"
-  end
-  if normalized:find("/nix/store/", 1, true) then
-    return "Nix"
-  end
-  local home = noctalia.getenv("HOME") or ""
-  local dataHome = noctalia.getenv("XDG_DATA_HOME")
-  local userRoot = (type(dataHome) == "string" and dataHome ~= "" and dataHome or (home .. "/.local/share"))
-  if startsWith(normalized, userRoot .. "/applications/") then
-    return "User"
-  end
-  return "System"
-end
-
 local function originSuffix(origin)
   if origin == "Flatpak" then
     return " · Flatpak"
@@ -447,251 +393,61 @@ local function originSuffix(origin)
   return ""
 end
 
-local currentDesktop = (noctalia.getenv("XDG_CURRENT_DESKTOP") or ""):upper()
+-- ── application discovery ───────────────────────────────────────────────────
 
-local function parseDesktopContent(content, path, id)
-  if type(content) ~= "string" or content == "" then
-    return nil
-  end
-
-  local inMain = false
-  local seenMain = false
-  local fields = {}
-  local localizedNames = {}
-  local actionOrder = {}
-  local actions = {}
-
-  for rawLine in content:gmatch("([^\n]*)\n?") do
-    local line = rawLine:gsub("\r$", "")
-    local section = line:match("^%[(.*)%]$")
-    if section ~= nil then
-      inMain = section == "Desktop Entry"
-      if inMain then
-        seenMain = true
-      end
-    elseif inMain and line ~= "" and line:sub(1, 1) ~= "#" then
-      local key, value = line:match("^([^=]+)=(.*)$")
-      if key ~= nil then
-        key = trim(key)
-        local baseKey, locale = key:match("^([^%[]+)%[([^%]]+)%]$")
-        if baseKey ~= nil then
-          if baseKey == "Name" then
-            localizedNames[#localizedNames + 1] = decodeDesktopValue(value)
-          end
-        else
-          fields[key] = decodeDesktopValue(value)
-        end
-      end
-    end
-  end
-
-  if not seenMain or fields.Type ~= "Application" then
-    return nil
-  end
-  if parseDesktopBool(fields.NoDisplay) or parseDesktopBool(fields.Hidden) then
-    return nil
-  end
-  if fields.Name == nil or trim(fields.Name) == "" then
-    return nil
-  end
-
-  local onlyShowIn = splitSemicolon(fields.OnlyShowIn)
-  if #onlyShowIn > 0 then
-    local found = false
-    for _, token in ipairs(onlyShowIn) do
-      if currentDesktop:find(token:upper(), 1, true) ~= nil then
-        found = true
-        break
-      end
-    end
-    if not found then
-      return nil
-    end
-  end
-  local notShowIn = splitSemicolon(fields.NotShowIn)
-  for _, token in ipairs(notShowIn) do
-    if currentDesktop:find(token:upper(), 1, true) ~= nil then
-      return nil
-    end
-  end
-
-  local name = trim(fields.Name)
-  local entry = {
-    id = id,
-    path = path,
-    name = name,
-    nameLower = name:lower(),
-    generic = fields.GenericName or "",
-    genericLower = lower(fields.GenericName),
-    comment = fields.Comment or "",
-    exec = fields.Exec or "",
-    icon = fields.Icon or "",
-    categories = fields.Categories or "",
-    keywords = fields.Keywords or "",
-    keywordsLower = lower(fields.Keywords),
-    startupWmClass = fields.StartupWMClass or "",
-    terminal = parseDesktopBool(fields.Terminal),
-    origin = detectOrigin(path),
-    localizedNames = localizedNames,
-  }
-  entry.searchNames = { entry.nameLower }
-  for _, alias in ipairs(localizedNames) do
-    local lowerAlias = lower(alias)
-    if lowerAlias ~= entry.nameLower then
-      entry.searchNames[#entry.searchNames + 1] = lowerAlias
-    end
-  end
-  if fields.Keywords ~= nil then
-    entry.keywordsList = splitSemicolon(fields.Keywords)
-  else
-    entry.keywordsList = {}
-  end
-  entry.categoriesList = splitSemicolon(fields.Categories)
-  return entry
-end
-
-local function appSearchRoots()
-  local roots = {}
-  local seen = {}
-
-  local function add(path)
-    if type(path) == "string" and path ~= "" and not seen[path] then
-      seen[path] = true
-      roots[#roots + 1] = path .. "/applications"
-    end
-  end
-
-  local home = noctalia.getenv("HOME")
-  local dataHome = noctalia.getenv("XDG_DATA_HOME")
-  add((type(dataHome) == "string" and dataHome ~= "" and dataHome) or (home and (home .. "/.local/share")) or nil)
-  local dataDirs = noctalia.getenv("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
-  for dir in dataDirs:gmatch("([^:]+)") do
-    add(dir)
-  end
-  add("/usr/local/share")
-  add("/usr/share")
-  if home ~= nil then
-    add(home .. "/.local/share/flatpak/exports/share")
-  end
-  add("/var/lib/flatpak/exports/share")
-  add("/var/lib/snapd/desktop")
-  return roots
-end
-
--- Discovery runs off the callback thread: `find` produces the candidate list and
--- each desktop file is read with readFileAsync. Parsing a few hundred files in
--- one callback would blow the 25 ms per-callback CPU budget.
+-- Desktop files are parsed by a helper process: a large entry can take longer
+-- than the 25 ms callback budget when parsed in Luau.
 local APP_SCAN_INTERVAL = 30
-local APP_READ_CONCURRENCY = 8
+local appRefreshPending = false
 
-local function finishAppScan()
-  local scan = appScan
-  if scan == nil then
-    return
-  end
-  appScan = nil
-  local out = scan.out
-  table.sort(out, function(a, b)
-    if a.nameLower == b.nameLower then
-      return a.id < b.id
-    end
-    return a.nameLower < b.nameLower
-  end)
-  apps = out
+local function finishAppScan(list)
+  apps = list
   appsAt = os.time()
   appCategories = nil
   pinnedRank = {}
   pinnedSet = {}
   resolvePinned()
   if isOpen then
-    refresh()
-    render()
+    appRefreshPending = true
+    panel.setNeedsFrameTick(true)
   end
-end
-
-local pumpAppScan
-
-local function enqueueDesktopFile(scan, path)
-  local name = path:match("([^/]+)$")
-  if name == nil or name:sub(-8) ~= ".desktop" then
-    return
-  end
-  local id = name:sub(1, #name - 8)
-  if scan.seen[id] then
-    return
-  end
-  scan.seen[id] = true
-  scan.queue[#scan.queue + 1] = { path = path, id = id }
 end
 
 local function startAppScan()
-  if appScan ~= nil then
+  if appScan then
     return
   end
-  local roots = appSearchRoots()
-  local scan = {
-    queue = {},
-    cursor = 1,
-    inFlight = 0,
-    out = {},
-    seen = {},
-  }
-  appScan = scan
+  appScan = true
 
-  local argv = { "find" }
-  for _, root in ipairs(roots) do
-    argv[#argv + 1] = root
+  local interpreter = nil
+  for _, name in ipairs({ "python3", "python" }) do
+    if noctalia.commandExists(name) then
+      interpreter = name
+      break
+    end
   end
-  argv[#argv + 1] = "-maxdepth"
-  argv[#argv + 1] = "4"
-  argv[#argv + 1] = "-name"
-  argv[#argv + 1] = "*.desktop"
+  if interpreter == nil then
+    appScan = nil
+    finishAppScan({})
+    return
+  end
 
-  local started = noctalia.runAsync(argv, function(result)
-    if appScan ~= scan then
-      return
+  local dir = noctalia.pluginDir() or "."
+  local started = noctalia.runAsync({ interpreter, dir .. "/scan-apps.py" }, function(result)
+    appScan = nil
+    local list = {}
+    if type(result) == "table" and result.exitCode == 0 and type(result.stdout) == "string" then
+      local ok, decoded = pcall(noctalia.json.decode, result.stdout)
+      if ok and type(decoded) == "table" then
+        list = decoded
+      end
     end
-    local stdout = type(result) == "table" and result.stdout or ""
-    for path in stdout:gmatch("[^\n]+") do
-      enqueueDesktopFile(scan, path)
-    end
-    pumpAppScan()
+    finishAppScan(list)
   end, 15000)
 
   if not started then
-    finishAppScan()
-  end
-end
-
-pumpAppScan = function()
-  local scan = appScan
-  if scan == nil then
-    return
-  end
-
-  while scan.inFlight < APP_READ_CONCURRENCY and scan.cursor <= #scan.queue do
-    local item = scan.queue[scan.cursor]
-    scan.cursor = scan.cursor + 1
-    scan.inFlight = scan.inFlight + 1
-    local started = noctalia.readFileAsync(item.path, function(contents)
-      if appScan == scan then
-        scan.inFlight = scan.inFlight - 1
-        if type(contents) == "string" and contents ~= "" then
-          local entry = parseDesktopContent(contents, item.path, item.id)
-          if entry ~= nil then
-            scan.out[#scan.out + 1] = entry
-          end
-        end
-        pumpAppScan()
-      end
-    end)
-    if not started then
-      scan.inFlight = scan.inFlight - 1
-    end
-  end
-
-  if scan.inFlight == 0 and scan.cursor > #scan.queue then
-    finishAppScan()
+    appScan = nil
+    finishAppScan({})
   end
 end
 
@@ -2267,6 +2023,15 @@ function onKey(chord, pressed)
   end
 end
 
+function onFrameTick(_deltaMs)
+  if appRefreshPending then
+    appRefreshPending = false
+    panel.setNeedsFrameTick(false)
+    refresh()
+    render()
+  end
+end
+
 function onOpen(context)
   isOpen = true
   config = loadConfig()
@@ -2289,5 +2054,7 @@ end
 
 function onClose()
   isOpen = false
+  appRefreshPending = false
   calcSeq = calcSeq + 1
+  panel.setNeedsFrameTick(false)
 end
