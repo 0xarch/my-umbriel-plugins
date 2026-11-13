@@ -208,6 +208,8 @@ local calcFor = nil
 local calcSeq = 0
 local calcPending = false
 local iconCache = {}
+local iconBudget = 0
+local iconPending = false
 local usageBuiltinCounts = {}
 local usageBuiltinRecent = {}
 local usageOwn = { counts = {}, recent = {} }
@@ -1582,6 +1584,10 @@ local function isGrid()
     or providerId == "Wallpaper" or providerId == "Session" or providerId == "Overview"
 end
 
+-- Icon-theme lookups are the expensive part of a grid render. Resolve a few
+-- per frame and show glyph fallbacks for the rest until the next frame.
+local ICON_LOOKUPS_PER_RENDER = 4
+
 local function resolveIcon(name, size)
   if type(name) ~= "string" or name == "" then
     return nil
@@ -1594,6 +1600,11 @@ local function resolveIcon(name, size)
     end
     return cached
   end
+  if iconBudget <= 0 then
+    iconPending = true
+    return nil
+  end
+  iconBudget = iconBudget - 1
   local path = noctalia.appIconPath(name, size)
   if type(path) == "string" and path ~= "" then
     iconCache[key] = path
@@ -1778,6 +1789,9 @@ function render()
     return
   end
 
+  iconBudget = ICON_LOOKUPS_PER_RENDER
+  iconPending = false
+
   local header = ui.row({
     height = 46,
     gap = 8,
@@ -1853,6 +1867,9 @@ function render()
   })
 
   panel.render(ui.column({ flexGrow = 1, gap = 10 }, root))
+  if iconPending then
+    panel.setNeedsFrameTick(true)
+  end
 end
 
 -- ── activation ──────────────────────────────────────────────────────────────
@@ -2011,11 +2028,16 @@ function onKey(chord, pressed)
 end
 
 function onFrameTick(_deltaMs)
+  local needsRender = appRefreshPending
   if appRefreshPending then
     appRefreshPending = false
-    panel.setNeedsFrameTick(false)
     refresh()
+  end
+  if needsRender or iconPending then
     render()
+  end
+  if not appRefreshPending and not iconPending then
+    panel.setNeedsFrameTick(false)
   end
 end
 
