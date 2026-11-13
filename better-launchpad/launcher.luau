@@ -3326,9 +3326,20 @@ function onFrameTick(_deltaMs)
   local refreshTick = false
   if flags.apps then
     flags.apps = false
-    refresh()
     -- Score and rebuild are both heavy; give each its own frame so the pair
-    -- never crowds the 25 ms budget on a cold machine.
+    -- never crowds the 25 ms budget on a cold machine. The first scan frame
+    -- also pays for the freshly decoded catalog's GC step, which can push it
+    -- over the budget: retry once on the next frame (never more, or the host's
+    -- three consecutive timeouts would disable the panel) so a cold-start blip
+    -- cannot leave the grid empty.
+    local ok = pcall(refresh)
+    if not ok and not flags.retried then
+      flags.retried = true
+      flags.apps = true
+      panel.setNeedsFrameTick(true)
+      return
+    end
+    flags.retried = false
     flags.render = true
     refreshTick = true
   end
