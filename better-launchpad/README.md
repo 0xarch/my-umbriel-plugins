@@ -97,8 +97,9 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   `LANG`: `Name[zh_CN]` (and the `GenericName`, `Comment`, and `Keywords`
   variants) wins over the untranslated value, and every translation stays
   searchable as an alias.
-- Flatpak and Snap entries show a package badge, and AppImage entries show the
-  AppImage badge. The badge's origin label appears as the tile tooltip.
+- Flatpak and Snap entries show a package badge in the tile's bottom-right
+  corner, and AppImage entries show the AppImage badge there. The badge's origin
+  label appears as the tile tooltip.
 - Usage boosting only applies when `shell.launcher.sort_by_usage` is enabled.
 
 ## Development

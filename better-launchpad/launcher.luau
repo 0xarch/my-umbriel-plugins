@@ -1690,13 +1690,12 @@ local function tile(result, index)
       ui.glyph({ name = "pin-filled", size = 11, color = "primary" }),
     })
   end
-  local badgeRow = ui.row({ height = 12, justify = "space_between", align = "center" }, {
-    pinBadge or ui.spacer({ flexGrow = 1 }),
-    originBadge(result.origin, 12) or ui.spacer({ flexGrow = 1 }),
-  })
+  local badge = originBadge(result.origin, 12)
 
   local children = {
-    badgeRow,
+    ui.row({ height = 12, justify = "end", align = "center" }, {
+      pinBadge or ui.spacer({ flexGrow = 1 }),
+    }),
     iconNode(result, iconWidth, iconHeight),
     ui.label({
       text = result.title,
@@ -1706,11 +1705,14 @@ local function tile(result, index)
       color = isFocused(index) and "on_surface" or "on_surface_variant",
       height = 24,
     }),
+    ui.row({ height = 12, justify = "end", align = "center" }, {
+      badge or ui.spacer({ flexGrow = 1 }),
+    }),
   }
   return ui.column({
     key = "res-" .. index,
     flexGrow = 1,
-    height = 92,
+    height = 104,
     gap = 2,
     padding = 4,
     align = "center",
@@ -2056,11 +2058,11 @@ function onResultHover(state, key)
   if not isOpen then
     return
   end
-  local index = tonumber(string.match(key or "", "^res%-(%d+)$"))
-  if index == nil then
-    return
-  end
   if state == "true" then
+    local index = tonumber(string.match(key or "", "^res%-(%d+)$"))
+    if index == nil then
+      return
+    end
     if hoverIndex == index and not keyboardFocus then
       return
     end
@@ -2068,7 +2070,9 @@ function onResultHover(state, key)
     keyboardFocus = false
     selected = index
     render()
-  elseif hoverIndex == index then
+  elseif hoverIndex ~= nil or keyboardFocus then
+    -- The host reports a leave only for the tile that owns the hover, so any
+    -- leave clears the pointer focus even if its key is not the one we stored.
     hoverIndex = nil
     keyboardFocus = false
     render()
