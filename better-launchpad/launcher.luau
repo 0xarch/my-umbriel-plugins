@@ -3927,7 +3927,10 @@ function onOpen(context)
   editState.expanded = {}
   editState.rename = nil
   anim.resetFolder()
+  -- A stale timestamp from a previous open would make the first frame jump
+  -- straight to the end, so every open re-arms the clock.
   anim.open = 0
+  anim.openAt = nil
   lastRight.index = nil
   query = type(context) == "string" and context or ""
   providerId = "" -- force a provider reset for the new session
@@ -3954,6 +3957,7 @@ function onClose()
   mode = "normal"
   anim.resetFolder()
   anim.open = 1
+  anim.openAt = nil
   lastRight.index = nil
   flags.apps = false
   calc.seq = calc.seq + 1
