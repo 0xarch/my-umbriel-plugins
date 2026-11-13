@@ -63,9 +63,10 @@ exclusive: a folded application has no top-level row, so it appears only
 inside its folder (a typed search still finds it).
 
 - In the app grid a folder renders as a rounded tile with up to four member
-  icons (missing members get empty placeholders) and the member count in place
-  of the origin badge. A new folder is named after `folder.new` in the
-  translations, numbered when that name is taken.
+  icons (missing members get empty placeholders). The member count is drawn in
+  the layout editor only; the normal grid keeps the origin band empty. A new
+  folder is named after `folder.new` in the translations, numbered when that
+  name is taken.
 - Clicking it opens a subview over a scrim that covers the whole panel,
   including the search bar. The subview shows the members with the same tiles
   as the main view; clicking the scrim (outside the subview) or the header's

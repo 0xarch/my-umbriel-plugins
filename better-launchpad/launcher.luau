@@ -2456,13 +2456,20 @@ local function folderIconGrid(row)
 end
 
 -- `renaming` swaps the four-icon preview for a pencil: an expanded folder in
--- the editor is renamed through that icon instead of being opened.
-local function folderCard(result, focused, key, renaming)
+-- the editor is renamed through that icon instead of being opened. The member
+-- count is only drawn in the editor, where it helps while arranging; the
+-- normal grid leaves the origin band empty. `grow` lets the editor's drag
+-- source stretch the card across its cell exactly like an app tile.
+local function folderCard(result, focused, key, renaming, grow, showCount)
   local row = result.folder
   local count = #(row.entries or {})
   local icon = folderIconGrid(row)
   if renaming then
     icon = ui.glyph({ name = "pencil", size = 28, color = "primary" })
+  end
+  local footer = ui.spacer({ flexGrow = 1 })
+  if showCount then
+    footer = ui.label({ text = tostring(count), fontSize = 10, color = "on_surface_variant" })
   end
   local children = {
     ui.row({ height = TILE_BADGE_BAND, justify = "end", align = "center" }, {
@@ -2478,9 +2485,7 @@ local function folderCard(result, focused, key, renaming)
         color = focused and "on_surface" or "on_surface_variant",
       }),
     }),
-    ui.row({ height = TILE_ORIGIN_BAND, justify = "end", align = "center" }, {
-      ui.label({ text = tostring(count), fontSize = 10, color = "on_surface_variant" }),
-    }),
+    ui.row({ height = TILE_ORIGIN_BAND, justify = "end", align = "center" }, { footer }),
   }
   return ui.column({
     key = key,
@@ -2491,6 +2496,7 @@ local function folderCard(result, focused, key, renaming)
     justify = "start",
     radius = 10,
     fill = focused and "primary/0.16" or "surface/0",
+    flexGrow = grow == true and 1 or nil,
   }, children)
 end
 
@@ -2804,7 +2810,10 @@ end
 local function editTile(row, position, onClick)
   local card = nil
   if row.type == "folder" then
-    card = folderCard(folderResult(row), false, "ecard-" .. position, editState.expanded[row.id] == true)
+    card = folderCard(
+      folderResult(row), false, "ecard-" .. position,
+      editState.expanded[row.id] == true, true, true
+    )
   else
     local entry = findAppByPath(row.id)
     if entry == nil then
@@ -2895,7 +2904,7 @@ editState.editShrinkTile = function(folder, position)
   }, {
     ui.button({
       key = "eshrinkbtn-" .. position,
-      glyph = "chevron-up",
+      glyph = "circle-chevron-left",
       text = T("edit.collapse", "Collapse"),
       fontSize = 11,
       glyphSize = 20,
