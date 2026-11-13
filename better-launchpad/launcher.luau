@@ -248,7 +248,11 @@ local anim = {
   folderMs = 160,
   folderTarget = 0,
   folderAt = nil,
-  folderFrom = 0,
+  -- A frame can arrive late (the first layout after a click measured ~97 ms),
+  -- and one such gap would skip most of a 160 ms fade. Each step advances at
+  -- most this much, so a dropped frame costs one step instead of the whole
+  -- animation.
+  maxStep = 34,
 }
 
 anim.ease = function(t)
@@ -261,13 +265,15 @@ end
 anim.step = function()
   local now = noctalia.nowMs()
   local changed = false
+  -- The clock is armed on the first frame after the render that showed the
+  -- tree, so a late first frame cannot skip the animation.
   if anim.open < 1 then
     if anim.openAt == nil then
-      -- The clock starts on the first frame after the render that showed the
-      -- tree, so a late first frame cannot skip the animation.
       anim.openAt = now
     else
-      anim.open = math.min(1, math.max(0, (now - anim.openAt) / anim.openMs))
+      local step = math.min(math.max(now - anim.openAt, 0), anim.maxStep) / anim.openMs
+      anim.openAt = now
+      anim.open = math.min(1, anim.open + step)
       if anim.open >= 1 then
         anim.openAt = nil
       end
@@ -277,12 +283,15 @@ anim.step = function()
   if anim.folder ~= anim.folderTarget then
     if anim.folderAt == nil then
       anim.folderAt = now
-      anim.folderFrom = anim.folder
     else
-      local t = math.min(1, math.max(0, (now - anim.folderAt) / anim.folderMs))
-      anim.folder = anim.folderFrom + (anim.folderTarget - anim.folderFrom) * t
-      if t >= 1 then
-        anim.folder = anim.folderTarget
+      local step = math.min(math.max(now - anim.folderAt, 0), anim.maxStep) / anim.folderMs
+      anim.folderAt = now
+      if anim.folder < anim.folderTarget then
+        anim.folder = math.min(anim.folderTarget, anim.folder + step)
+      else
+        anim.folder = math.max(anim.folderTarget, anim.folder - step)
+      end
+      if anim.folder == anim.folderTarget then
         anim.folderAt = nil
       end
       changed = true

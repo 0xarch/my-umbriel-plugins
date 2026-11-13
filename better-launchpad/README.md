@@ -183,8 +183,10 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   here), and the folder subview fades and scales in and out over 160 ms. Progress
   is measured against `noctalia.nowMs`, not the frame delta, because the first
   delta after an idle surface can span the whole gap and would skip the fade in
-  one step. Each step is a normal render, and the frame loop stays alive until the
-  progress reaches its target.
+  one step; each step is also capped at ~2 frames so a single slow frame (the
+  first layout after a click measured ~97 ms) costs one step, not the fade. Each
+  step is a normal render, and the frame loop stays alive until the progress
+  reaches its target.
 - The folder subview reuses those tiles, so its overlay keys repeat the grid's.
   Pointer focus is scoped to the list that owns the hover: a hover inside the
   subview never highlights the card at the same index under the scrim.
