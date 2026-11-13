@@ -225,6 +225,7 @@ local lastRightAt = 0
 local forceList = false
 local resultsShown = 0
 local moreResults = false
+local renderAfterRefresh = false
 
 -- Building the full tree for a large catalog overruns the 25 ms callback
 -- budget, so tiles appear in chunks: each frame adds RESULTS_PER_FRAME more
@@ -2706,50 +2707,61 @@ function onKey(chord, pressed)
 end
 
 function onFrameTick(_deltaMs)
-  local needsRender = appRefreshPending
+  local needsRender = false
+  local refreshTick = false
   if appRefreshPending then
     appRefreshPending = false
     refresh()
+    -- Score and rebuild are both heavy; give each its own frame so the pair
+    -- never crowds the 25 ms budget on a cold machine.
+    renderAfterRefresh = true
+    refreshTick = true
   end
-  if moreResults then
-    resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
-    needsRender = true
-  end
-  local drained = false
-  if not needsRender and #iconQueue > 0 then
-    -- A frame either builds the tree or resolves icons: chunk and refresh
-    -- frames skip the queue, quiet frames spend a small time budget on it.
-    -- Resolved icons are drawn on a later frame so a slow lookup never stacks
-    -- with a rebuild.
-    local started = os.clock()
-    while #iconQueue > 0 do
-      local job = table.remove(iconQueue, 1)
-      local path = noctalia.appIconPath(job.name, job.size)
-      if type(path) == "string" and path ~= "" then
-        iconCache[job.key] = path
-        iconCacheDirty = true
-        iconRenderPending = true
-      else
-        iconCache[job.key] = false
+  if not refreshTick then
+    if renderAfterRefresh then
+      renderAfterRefresh = false
+      needsRender = true
+    end
+    if moreResults then
+      resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
+      needsRender = true
+    end
+    local drained = false
+    if not needsRender and #iconQueue > 0 then
+      -- A frame either builds the tree or resolves icons: chunk and refresh
+      -- frames skip the queue, quiet frames spend a small time budget on it.
+      -- Resolved icons are drawn on a later frame so a slow lookup never stacks
+      -- with a rebuild.
+      local started = os.clock()
+      while #iconQueue > 0 do
+        local job = table.remove(iconQueue, 1)
+        local path = noctalia.appIconPath(job.name, job.size)
+        if type(path) == "string" and path ~= "" then
+          iconCache[job.key] = path
+          iconCacheDirty = true
+          iconRenderPending = true
+        else
+          iconCache[job.key] = false
+        end
+        if (os.clock() - started) * 1000 >= ICON_LOOKUP_BUDGET_MS then
+          break
+        end
       end
-      if (os.clock() - started) * 1000 >= ICON_LOOKUP_BUDGET_MS then
-        break
+      drained = true
+      if #iconQueue == 0 and iconCacheDirty then
+        saveIconCache()
+        iconCacheDirty = false
       end
     end
-    drained = true
-    if #iconQueue == 0 and iconCacheDirty then
-      saveIconCache()
-      iconCacheDirty = false
+    if not drained and iconRenderPending then
+      iconRenderPending = false
+      needsRender = true
     end
-  end
-  if not drained and iconRenderPending then
-    iconRenderPending = false
-    needsRender = true
   end
   if needsRender or #iconQueue > 0 or iconRenderPending then
     render()
   end
-  if not appRefreshPending and #iconQueue == 0 and not moreResults and not iconRenderPending then
+  if #iconQueue == 0 and not moreResults and not iconRenderPending and not renderAfterRefresh then
     panel.setNeedsFrameTick(false)
   end
 end
