@@ -198,17 +198,11 @@ local apps = nil
 local appsAt = 0
 local appScan = nil
 local appCategories = nil
-local emoji = nil
-local emojiAt = 0
+local emojiState = { list = nil, at = 0 }
 local wallpapers = nil
 local wallpapersAt = 0
-local windows = nil
-local windowsAt = 0
-local windowsLoading = false
-local calcResult = nil
-local calcFor = nil
-local calcSeq = 0
-local calcPending = false
+local windowState = { list = nil, at = 0, loading = false }
+local calc = { result = nil, expression = nil, seq = 0, pending = false }
 local iconCache = {}
 local usageBuiltinCounts = {}
 local usageBuiltinRecent = {}
@@ -220,12 +214,13 @@ local orderRank = {}
 local order = nil
 local orderPath = nil
 local mode = "normal"
-local lastRightIndex = nil
-local lastRightAt = 0
+local lastRight = { index = nil, at = 0 }
 local forceList = false
 local resultsShown = 0
 local moreResults = false
 local renderAfterRefresh = false
+local folderOpen = nil
+local folderResults = {}
 
 -- Building the full tree for a large catalog overruns the 25 ms callback
 -- budget, so tiles appear in chunks: each frame adds RESULTS_PER_FRAME more
@@ -241,7 +236,10 @@ local refresh
 local resolvePinned
 local focusInput
 local renderNormal
+local resultNodesFrom
 local openResultMenu
+local openFolder
+local closeFolder
 local enterEditMode
 local exitEditMode
 
@@ -423,24 +421,63 @@ local function orderFile()
   return orderPath
 end
 
+-- Folder rows carry `{ type = "folder", id = "folder-N", name = ..., entries = { paths } }`;
+-- members are desktop paths, in the folder's own display order. Folders never
+-- nest: a member path is always an application.
+local function normalizeFolderEntries(value)
+  local entries = {}
+  if type(value) == "table" then
+    for _, path in ipairs(value) do
+      if type(path) == "string" and path ~= "" then
+        entries[#entries + 1] = path
+      end
+    end
+  end
+  return entries
+end
+
 local function normalizeOrderRow(row)
   if type(row) ~= "table" or type(row.id) ~= "string" or row.id == "" then
-    return nil
+    -- A hand-written folder may omit its id; loadOrder assigns one afterwards.
+    if not (type(row) == "table" and row.type == "folder") then
+      return nil
+    end
   end
   local out = {}
   for key, value in pairs(row) do
-    if key ~= "type" and key ~= "id" and key ~= "pinned" then
+    if key ~= "type" and key ~= "id" and key ~= "pinned" and key ~= "entries" then
       out[key] = value
     end
   end
   out.type = type(row.type) == "string" and row.type or "app"
-  out.id = row.id
+  if out.type == "folder" then
+    out.entries = normalizeFolderEntries(row.entries)
+  end
+  if type(row.id) == "string" and row.id ~= "" then
+    out.id = row.id
+  end
   if row.pinned == true then
     out.pinned = true
   elseif row.pinned == false then
     out.pinned = false
   end
   return out
+end
+
+local saveOrder
+
+local function nextFolderId(rows)
+  local used = {}
+  for _, row in ipairs(rows or loadOrder().entries) do
+    if row.type == "folder" and type(row.id) == "string" then
+      used[row.id] = true
+    end
+  end
+  local n = 1
+  while used["folder-" .. n] do
+    n = n + 1
+  end
+  return "folder-" .. n
 end
 
 local function loadOrder()
@@ -459,10 +496,21 @@ local function loadOrder()
     end
   end
   order = { version = ORDER_VERSION, entries = rows }
+  -- Give id-less folders (hand-written rows) a stable identity, then persist.
+  local assigned = false
+  for _, row in ipairs(order.entries) do
+    if row.type == "folder" and (row.id == nil or row.id == "") then
+      row.id = nextFolderId(order.entries)
+      assigned = true
+    end
+  end
+  if assigned then
+    saveOrder()
+  end
   return order
 end
 
-local function saveOrder()
+saveOrder = function()
   local path = orderFile()
   if path == nil then
     return false
@@ -556,6 +604,10 @@ local function syncOrder()
   for _, row in ipairs(store.entries) do
     if row.type == "app" then
       seen[row.id] = true
+    elseif row.type == "folder" then
+      for _, path in ipairs(row.entries or {}) do
+        seen[path] = true
+      end
     end
   end
   for _, entry in ipairs(apps or {}) do
@@ -570,6 +622,132 @@ local function syncOrder()
     saveOrder()
   end
   reindexOrder()
+end
+
+-- ── folder mutations ────────────────────────────────────────────────────────
+
+-- Create a folder holding `paths` (in that order) at the position of its first
+-- member; the members' top-level rows are removed, so an application lives in
+-- exactly one place. Returns the new row.
+local function createFolderWithApps(paths, name)
+  if type(paths) ~= "table" or #paths == 0 then
+    return nil
+  end
+  local store = loadOrder()
+  local wanted = {}
+  for _, path in ipairs(paths) do
+    if type(path) == "string" and path ~= "" and wanted[path] == nil then
+      wanted[path] = true
+    end
+  end
+
+  local anchor = nil
+  local members = {}
+  for index, row in ipairs(store.entries) do
+    if row.type == "app" and wanted[row.id] then
+      if anchor == nil then
+        anchor = index
+      end
+      members[#members + 1] = row.id
+    end
+  end
+  if #members == 0 then
+    return nil
+  end
+
+  local folder = {
+    type = "folder",
+    id = nextFolderId(store.entries),
+    name = type(name) == "string" and name ~= "" and name or T("folder.new", "New Folder"),
+    entries = members,
+  }
+  for index = #store.entries, 1, -1 do
+    local row = store.entries[index]
+    if row.type == "app" and wanted[row.id] then
+      table.remove(store.entries, index)
+      if index < anchor then
+        anchor = anchor - 1
+      end
+    end
+  end
+  table.insert(store.entries, anchor or 1, folder)
+  saveOrder()
+  reindexOrder()
+  return folder
+end
+
+local function folderRow(folderId)
+  if type(folderId) ~= "string" then
+    return nil
+  end
+  for _, row in ipairs(loadOrder().entries) do
+    if row.type == "folder" and row.id == folderId then
+      return row
+    end
+  end
+  return nil
+end
+
+local function addToFolder(folderId, path)
+  local row = folderRow(folderId)
+  if row == nil or type(path) ~= "string" or path == "" then
+    return false
+  end
+  for _, member in ipairs(row.entries) do
+    if member == path then
+      return false
+    end
+  end
+  row.entries[#row.entries + 1] = path
+  -- The app's top-level row goes away: membership is exclusive.
+  local index = orderRowIndex(path)
+  if index ~= nil and loadOrder().entries[index].type == "app" then
+    table.remove(loadOrder().entries, index)
+  end
+  saveOrder()
+  reindexOrder()
+  return true
+end
+
+-- Send every member back to the top level at the folder's position, then drop
+-- the folder itself.
+local function disbandFolder(folderId)
+  local index = orderRowIndex(folderId)
+  local row = folderRow(folderId)
+  if index == nil or row == nil then
+    return false
+  end
+  local store = loadOrder()
+  table.remove(store.entries, index)
+  for offset, path in ipairs(row.entries or {}) do
+    table.insert(store.entries, index + offset - 1, { type = "app", id = path })
+  end
+  saveOrder()
+  reindexOrder()
+  return true
+end
+
+local function removeFromFolder(folderId, path)
+  local row = folderRow(folderId)
+  if row == nil then
+    return false
+  end
+  for index, member in ipairs(row.entries) do
+    if member == path then
+      table.remove(row.entries, index)
+      -- An emptied folder disappears; its spot keeps the remaining rows.
+      if #row.entries == 0 then
+        local position = orderRowIndex(folderId)
+        if position ~= nil then
+          table.remove(loadOrder().entries, position)
+        end
+      end
+      saveOrder()
+      reindexOrder()
+      return true
+    end
+  end
+  return false
 end
 
 local function setPinned(path, pinned)
@@ -734,8 +912,8 @@ end
 
 local function getEmoji()
   local now = os.time()
-  if emoji ~= nil and now - emojiAt <= 300 then
-    return emoji
+  if emojiState.list ~= nil and now - emojiState.at <= 300 then
+    return emojiState.list
   end
   local candidates = {
     "/usr/share/noctalia/assets/emoji.json",
@@ -776,8 +954,8 @@ local function getEmoji()
       }
     end
   end
-  emoji = out
-  emojiAt = now
+  emojiState.list = out
+  emojiState.at = now
   return out
 end
 
@@ -872,16 +1050,16 @@ end
 
 local function refreshWindows(force)
   local now = os.time()
-  if windowsLoading then
+  if windowState.loading then
     return
   end
-  if not force and windows ~= nil and now - windowsAt <= 5 then
+  if not force and windowState.list ~= nil and now - windowState.at <= 5 then
     return
   end
-  windowsLoading = true
+  windowState.loading = true
   local ok = noctalia.runAsync({ "umbriel", "windows", "--json" }, function(result)
-    windowsLoading = false
-    windowsAt = os.time()
+    windowState.loading = false
+    windowState.at = os.time()
     local list = {}
     if result ~= nil and result.exitCode == 0 and type(result.stdout) == "string" then
       local decoded = readJsonText(result.stdout)
@@ -903,15 +1081,15 @@ local function refreshWindows(force)
     table.sort(list, function(a, b)
       return lower(a.title) < lower(b.title)
     end)
-    windows = list
+    windowState.list = list
     if isOpen and providerId == "Windows" then
       refresh()
       render()
     end
   end)
   if not ok then
-    windowsLoading = false
-    windows = {}
+    windowState.loading = false
+    windowState.list = {}
   end
 end
 
@@ -1222,6 +1400,66 @@ local function appResult(entry, score)
   }
 end
 
+-- ── folders ─────────────────────────────────────────────────────────────────
+
+local FOLDER_GLYPH = "folder"
+local FOLDER_MEMBERS_SHOWN = 4
+
+local function folderDisplayName(row)
+  if type(row.name) == "string" and row.name ~= "" then
+    return row.name
+  end
+  return T("folder.new", "New Folder")
+end
+
+local function folderResult(row)
+  local name = folderDisplayName(row)
+  return {
+    provider = "Folder",
+    id = row.id,
+    folder = row,
+    title = name,
+    titleLower = lower(name),
+    subtitle = T("folder.count", "{count} apps", { count = #(row.entries or {}) }),
+    glyph = FOLDER_GLYPH,
+    score = 0,
+  }
+end
+
+-- The empty query renders the stored layout: folders and top-level apps in
+-- store order. A typed query searches every application, folder member or not.
+local function storedLayoutResults()
+  local out = {}
+  for _, row in ipairs(loadOrder().entries) do
+    if row.type == "folder" then
+      out[#out + 1] = folderResult(row)
+    elseif row.type == "app" then
+      local entry = findAppByPath(row.id)
+      if entry ~= nil then
+        out[#out + 1] = appResult(entry, 0)
+      end
+    end
+  end
+  return out
+end
+
+-- The folder subview shows its members with the same tiles as the main view.
+local function buildFolderResults(row)
+  local out = {}
+  if type(row) ~= "table" or type(row.entries) ~= "table" then
+    return out
+  end
+  for _, path in ipairs(row.entries) do
+    local entry = findAppByPath(path)
+    if entry ~= nil then
+      local result = appResult(entry, 0)
+      result.inFolder = row.id
+      out[#out + 1] = result
+    end
+  end
+  return out
+end
+
 local function queryApplications(pattern, typed)
   local list = {}
   local recent = recentIndex("Applications")
@@ -1406,7 +1644,7 @@ end
 local function windowResults(pattern)
   local list = {}
   local needle = lower(pattern)
-  for _, item in ipairs(windows or {}) do
+  for _, item in ipairs(windowState.list or {}) do
     local title = item.title or ""
     local searchable = lower(title .. " " .. item.appId)
     local score = pattern == "" and 0 or fuzzy(needle, searchable)
@@ -1582,31 +1820,31 @@ local function maybeCalculate()
   end
 
   if expression == nil or expression == "" then
-    calcResult = nil
-    calcFor = nil
-    calcPending = false
+    calc.result = nil
+    calc.expression = nil
+    calc.pending = false
     return
   end
-  if calcFor == expression then
+  if calc.expression == expression then
     return
   end
 
-  calcFor = expression
-  calcResult = nil
-  calcPending = true
-  local seq = calcSeq + 1
-  calcSeq = seq
+  calc.expression = expression
+  calc.result = nil
+  calc.pending = true
+  local seq = calc.seq + 1
+  calc.seq = seq
 
   if not noctalia.commandExists("qalc") then
-    calcPending = false
+    calc.pending = false
     return
   end
 
   noctalia.runAsync({ "qalc", "-t", expression }, function(result)
-    if seq ~= calcSeq then
+    if seq ~= calc.seq then
       return
     end
-    calcPending = false
+    calc.pending = false
     if result == nil or result.exitCode ~= 0 then
       return
     end
@@ -1622,7 +1860,7 @@ local function maybeCalculate()
     if firstLine == "" or firstLine == expression then
       return
     end
-    calcResult = {
+    calc.result = {
       provider = "Calculator",
       id = "calc:" .. expression,
       title = firstLine,
@@ -1644,11 +1882,15 @@ local function buildResults()
   local list = {}
 
   if providerId == "Applications" then
-    list = queryApplications(providerQuery, providerQuery ~= "")
-    list = applyCategoryFilter(list)
-    -- The empty query is the app drawer: show every application. A typed query
-    -- stays capped so a very broad match does not build a huge tree.
-    if providerQuery ~= "" then
+    -- The empty query is the app drawer: the stored layout with folders. A
+    -- typed query searches every application and stays capped so a very broad
+    -- match does not build a huge tree.
+    if providerQuery == "" then
+      list = storedLayoutResults()
+      list = applyCategoryFilter(list)
+    else
+      list = queryApplications(providerQuery, true)
+      list = applyCategoryFilter(list)
       list = trimResults(list, 50)
     end
 
@@ -1688,8 +1930,8 @@ local function buildResults()
     end
 
     maybeCalculate()
-    if calcResult ~= nil then
-      table.insert(list, 1, calcResult)
+    if calc.result ~= nil then
+      table.insert(list, 1, calc.result)
       forceList = true
     end
     for _, item in ipairs(list) do
@@ -1700,8 +1942,8 @@ local function buildResults()
     end
   elseif providerId == "Calculator" then
     maybeCalculate()
-    if calcResult ~= nil then
-      list = { calcResult }
+    if calc.result ~= nil then
+      list = { calc.result }
     end
     forceList = true
   elseif providerId == "Emoji" then
@@ -1810,8 +2052,7 @@ local ICONS_PER_TICK = 12
 local iconQueue = {}
 local iconQueued = {}
 local iconRenderPending = false
-local iconCacheLoaded = false
-local iconCacheDirty = false
+local iconStore = { loaded = false, dirty = false }
 
 local function iconCacheFile()
   local dataDir = noctalia.pluginDataDir()
@@ -1822,10 +2063,10 @@ local function iconCacheFile()
 end
 
 local function loadIconCache()
-  if iconCacheLoaded then
+  if iconStore.loaded then
     return
   end
-  iconCacheLoaded = true
+  iconStore.loaded = true
   local path = iconCacheFile()
   local stored = path ~= nil and readJson(path) or nil
   if type(stored) ~= "table" or stored.version ~= ICON_CACHE_VERSION or type(stored.icons) ~= "table" then
@@ -1967,17 +2208,17 @@ local function requestEditMode(index)
     return false
   end
   local now = os.time()
-  if lastRightIndex == index and now - lastRightAt <= RIGHT_CLICK_WINDOW then
-    lastRightIndex = nil
+  if lastRight.index == index and now - lastRight.at <= RIGHT_CLICK_WINDOW then
+    lastRight.index = nil
     enterEditMode()
     return true
   end
-  lastRightIndex = index
-  lastRightAt = now
+  lastRight.index = index
+  lastRight.at = now
   return false
 end
 
-local function resultOverlay(result, index, height)
+local function resultOverlay(result, index, height, list)
   return ui.button({
     key = "ov-" .. index,
     height = height,
@@ -1985,12 +2226,12 @@ local function resultOverlay(result, index, height)
     opacity = 0,
     variant = "ghost",
     tooltip = originLabel(result.origin),
-    onClick = function() activate(index) end,
+    onClick = function() activate(index, list) end,
     onRightClick = function()
       if requestEditMode(index) then
         return
       end
-      openResultMenu(index)
+      openResultMenu(index, list)
     end,
     onHover = "onResultHover",
   })
@@ -2003,6 +2244,87 @@ local TILE_BADGE_BAND = 12
 local TILE_ICON_BAND = 42
 local TILE_NAME_BAND = 34
 local TILE_ORIGIN_BAND = 12
+
+-- Folder tiles show up to four member icons in a 2x2 grid; missing members
+-- get empty placeholders so the tile always has the same shape.
+local function folderMiniIcon(path)
+  local entry = path ~= nil and findAppByPath(path) or nil
+  if entry == nil then
+    return ui.box({ width = 19, height = 19, radius = 4, fill = "surface_container_high" })
+  end
+  local name = entry.icon ~= "" and entry.icon or "application-x-executable"
+  local iconPath = resolveIcon(name, 19)
+  if iconPath ~= nil then
+    return ui.image({ path = iconPath, width = 19, height = 19, fit = "contain" })
+  end
+  return ui.glyph({ name = "app-window", size = 13, color = "on_surface_variant" })
+end
+
+local function folderIconGrid(row)
+  local members = {}
+  for position = 1, FOLDER_MEMBERS_SHOWN do
+    members[#members + 1] = folderMiniIcon((row.entries or {})[position])
+  end
+  return ui.column({ gap = 2, align = "center" }, {
+    ui.row({ gap = 2 }, { members[1], members[2] }),
+    ui.row({ gap = 2 }, { members[3], members[4] }),
+  })
+end
+
+local function folderCard(result, focused, key)
+  local row = result.folder
+  local count = #(row.entries or {})
+  local children = {
+    ui.row({ height = TILE_BADGE_BAND, justify = "end", align = "center" }, {
+      ui.spacer({ flexGrow = 1 }),
+    }),
+    ui.row({ height = TILE_ICON_BAND, justify = "center", align = "center" }, {
+      folderIconGrid(row),
+    }),
+    ui.column({ height = TILE_NAME_BAND, align = "center", justify = "start", clip = true }, {
+      ui.label({
+        text = result.title,
+        fontSize = 11,
+        maxLines = 2,
+        textAlign = "center",
+        color = focused and "on_surface" or "on_surface_variant",
+      }),
+    }),
+    ui.row({ height = TILE_ORIGIN_BAND, justify = "end", align = "center" }, {
+      ui.label({ text = tostring(count), fontSize = 10, color = "on_surface_variant" }),
+    }),
+  }
+  return ui.column({
+    key = key,
+    height = TILE_HEIGHT,
+    gap = 0,
+    padding = 4,
+    align = "stretch",
+    justify = "start",
+    radius = 10,
+    fill = focused and "primary/0.16" or "surface/0",
+  }, children)
+end
+
+local function folderTile(result, index, list)
+  return ui.column({
+    key = "res-" .. index,
+    flexGrow = 1,
+    height = TILE_HEIGHT,
+    gap = 0,
+    align = "stretch",
+  }, {
+    folderCard(result, isFocused(index), "card-" .. index),
+    resultOverlay(result, index, TILE_HEIGHT, list),
+  })
+end
+
+local function folderListRow(result, index, list)
+  return ui.column({ key = "res-" .. index, height = ROW_HEIGHT, gap = 0, align = "stretch" }, {
+    listCard(result, isFocused(index), "card-" .. index),
+    resultOverlay(result, index, ROW_HEIGHT, list),
+  })
+end
 
 local function tileCard(result, focused, key, pinned, grow)
   local iconWidth, iconHeight = 40, 40
@@ -2051,7 +2373,10 @@ local function tileCard(result, focused, key, pinned, grow)
   }, children)
 end
 
-local function tile(result, index)
+local function tile(result, index, list)
+  if result.provider == "Folder" then
+    return folderTile(result, index, list)
+  end
   return ui.column({
     key = "res-" .. index,
     flexGrow = 1,
@@ -2060,7 +2385,7 @@ local function tile(result, index)
     align = "stretch",
   }, {
     tileCard(result, isFocused(index), "card-" .. index, result.pinned),
-    resultOverlay(result, index, TILE_HEIGHT),
+    resultOverlay(result, index, TILE_HEIGHT, list),
   })
 end
 
@@ -2102,21 +2427,30 @@ local function listCard(result, focused, key)
   }, children)
 end
 
-local function listRow(result, index)
+local function listRow(result, index, list)
+  if result.provider == "Folder" then
+    return folderListRow(result, index, list)
+  end
   return ui.column({ key = "res-" .. index, height = ROW_HEIGHT, gap = 0, align = "stretch" }, {
     listCard(result, isFocused(index), "card-" .. index),
-    resultOverlay(result, index, ROW_HEIGHT),
+    resultOverlay(result, index, ROW_HEIGHT, list),
   })
 end
 
 local function resultNodes()
+  return resultNodesFrom(results, nil)
+end
+
+-- `list` is the tile model the overlay closures resolve against: the main
+-- results, or the open folder's members.
+resultNodesFrom = function(list, keyPrefix)
   local nodes = {}
-  local count = math.min(resultsShown, #results)
-  moreResults = count < #results
+  local count = math.min(resultsShown, #list)
+  moreResults = count < #list
   if isGrid() then
     local row = {}
     for index = 1, count do
-      row[#row + 1] = tile(results[index], index)
+      row[#row + 1] = tile(list[index], index, list)
       if #row == 5 then
         nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
         row = {}
@@ -2130,7 +2464,7 @@ local function resultNodes()
     end
   else
     for index = 1, count do
-      nodes[#nodes + 1] = listRow(results[index], index)
+      nodes[#nodes + 1] = listRow(list[index], index, list)
     end
   end
   return nodes
@@ -2167,7 +2501,7 @@ local function emptyState()
     body = T("empty.windows", "No open windows were reported by the compositor.")
   elseif providerId == "Overview" then
     body = T("empty.providers", "Type a provider name or prefix.")
-  elseif calcPending then
+  elseif calc.pending then
     body = T("calculator.pending", "Calculating…")
   end
   return ui.column({ flexGrow = 1, align = "center", justify = "center", gap = 8 }, {
@@ -2297,17 +2631,42 @@ local function renderEdit()
   else
     body = ui.scroll({ key = "edit-" .. scrollRev, flexGrow = 1, gap = 6 }, nodes)
   end
-  panel.render(ui.column({ flexGrow = 1, gap = 10 }, { editHeader(), body }))
+  return ui.column({ flexGrow = 1, gap = 10 }, { editHeader(), body })
+end
+
+openFolder = function(row)
+  if type(row) ~= "table" or mode ~= "normal" then
+    return
+  end
+  folderOpen = row
+  folderResults = buildFolderResults(row)
+  hoverIndex = nil
+  selected = 1
+  inputRev = inputRev + 1
+  render()
+end
+
+closeFolder = function()
+  if folderOpen == nil then
+    return
+  end
+  folderOpen = nil
+  folderResults = {}
+  hoverIndex = nil
+  keyboardFocus = true
+  inputRev = inputRev + 1
+  render()
 end
 
 enterEditMode = function()
   if mode == "edit" or not isOpen then
     return
   end
+  closeFolder()
   mode = "edit"
   hoverIndex = nil
   keyboardFocus = true
-  lastRightIndex = nil
+  lastRight.index = nil
   scrollRev = scrollRev + 1
   render()
 end
@@ -2333,6 +2692,74 @@ function onReorderDrop(payload, value)
   moveOrderRow(payload, value)
 end
 
+-- The folder subview floats over a scrim that covers the whole panel,
+-- including the search bar. The root gets the panel's exact height so the
+-- mask can composite over it; clicks outside the subview land on the mask.
+local PANEL_HEIGHT = 500
+
+local function folderMask()
+  local body = nil
+  if #folderResults == 0 then
+    body = ui.label({
+      text = T("folder.empty", "This folder is empty."),
+      fontSize = 12,
+      color = "on_surface_variant",
+      textAlign = "center",
+    })
+  else
+    body = ui.scroll({
+      key = "folder-scroll-" .. (folderOpen.id or ""),
+      flexGrow = 1,
+      gap = 6,
+    }, resultNodesFrom(folderResults))
+  end
+  local subview = ui.column({
+    key = "folder-subview",
+    width = 420,
+    height = 360,
+    fill = "surface_container_high",
+    radius = 14,
+    border = "outline_variant",
+    borderWidth = 1,
+    clip = true,
+    onClick = function() end,
+  }, {
+    ui.row({ height = 44, paddingH = 12, gap = 8, align = "center" }, {
+      ui.glyph({ name = FOLDER_GLYPH, size = 18, color = "primary" }),
+      ui.label({
+        text = folderDisplayName(folderOpen),
+        fontSize = 14,
+        fontWeight = "semibold",
+        color = "on_surface",
+        flexGrow = 1,
+        maxLines = 1,
+      }),
+      ui.label({
+        text = T("folder.count", "{count} apps", { count = #folderResults }),
+        fontSize = 11,
+        color = "on_surface_variant",
+      }),
+      ui.button({
+        glyph = "x",
+        variant = "ghost",
+        onClick = function() closeFolder() end,
+        tooltip = T("folder.close", "Close"),
+      }),
+    }),
+    body,
+  })
+  return ui.column({
+    key = "folder-mask",
+    height = PANEL_HEIGHT,
+    translateY = -PANEL_HEIGHT,
+    fill = "scrim/0.55",
+    align = "center",
+    justify = "center",
+    clip = true,
+    onClick = function() closeFolder() end,
+  }, { subview })
+end
+
 function render()
   if not isOpen then
     return
@@ -2340,11 +2767,19 @@ function render()
 
   moreResults = false
 
+  local root = nil
   if mode == "edit" then
-    renderEdit()
+    root = renderEdit()
   else
-    renderNormal()
+    root = renderNormal()
   end
+  if folderOpen ~= nil and mode == "normal" then
+    root = ui.column({ key = "panel-root", height = PANEL_HEIGHT, gap = 0, clip = true }, {
+      ui.column({ flexGrow = 1, gap = 10 }, { root }),
+      folderMask(),
+    })
+  end
+  panel.render(root)
   if #iconQueue > 0 or moreResults or iconRenderPending then
     panel.setNeedsFrameTick(true)
   end
@@ -2369,7 +2804,7 @@ renderNormal = function()
       fontSize = 15,
       flexGrow = 1,
       frameVisible = false,
-      focus = true,
+      focus = folderOpen == nil,
       onChange = "onQueryChanged",
       onSubmit = "onSubmit",
     }),
@@ -2412,7 +2847,7 @@ renderNormal = function()
   end
   root[#root + 1] = body
 
-  panel.render(ui.column({ flexGrow = 1, gap = 10 }, root))
+  return ui.column({ flexGrow = 1, gap = 10 }, root)
 end
 
 -- ── activation ──────────────────────────────────────────────────────────────
@@ -2484,9 +2919,14 @@ local function activateSession(result)
   finish()
 end
 
-function activate(index)
-  local result = results[index]
+function activate(index, list)
+  local result = (list or results)[index]
   if result == nil then
+    return
+  end
+
+  if result.provider == "Folder" then
+    openFolder(result.folder)
     return
   end
 
@@ -2555,8 +2995,8 @@ end
 
 -- Mirrors the built-in menu: Open, the desktop actions, then pin/unpin. The
 -- layout editor is reachable from here as well as from a double right-click.
-openResultMenu = function(index)
-  local result = results[index]
+openResultMenu = function(index, list)
+  local result = (list or results)[index]
   if result == nil or panel.openContextMenu == nil then
     return false
   end
@@ -2565,7 +3005,7 @@ openResultMenu = function(index)
   for _, action in ipairs(launchableActions(result.entry)) do
     items[#items + 1] = { id = "act:" .. action.position, label = action.name }
   end
-  if result.provider == "Applications" then
+  if result.provider == "Applications" and result.inFolder == nil then
     items[#items + 1] = { kind = "separator" }
     if result.pinned then
       items[#items + 1] = { id = "unpin", label = T("menu.unpin", "Unpin from Launcher") }
@@ -2584,24 +3024,30 @@ openResultMenu = function(index)
   return opened == true
 end
 
-local function resultIndexById(id)
+-- Menu callbacks resolve the result by id from either tile list.
+local function findResultById(id)
   for index, item in ipairs(results) do
     if item.id == id then
-      return index
+      return index, results
     end
   end
-  return nil
+  for index, item in ipairs(folderResults) do
+    if item.id == id then
+      return index, folderResults
+    end
+  end
+  return nil, nil
 end
 
 function onResultMenu(actionId, context)
   if not isOpen or type(actionId) ~= "string" or type(context) ~= "string" then
     return
   end
-  local index = resultIndexById(context)
+  local index, list = findResultById(context)
   if index == nil then
     return
   end
-  local result = results[index]
+  local result = list[index]
   if actionId == "open" then
     activate(index)
   elseif actionId == "edit" then
@@ -2627,6 +3073,9 @@ function onResultMenu(actionId, context)
 end
 
 function onSubmit(value)
+  if folderOpen ~= nil then
+    return
+  end
   if type(value) == "string" and value ~= query then
     query = value
     refresh()
@@ -2683,6 +3132,9 @@ end
 
 function onKey(chord, pressed)
   if not isOpen or pressed ~= true then
+    return
+  end
+  if folderOpen ~= nil then
     return
   end
   if chord == "Ctrl+e" then
@@ -2749,7 +3201,7 @@ function onFrameTick(_deltaMs)
         table.remove(iconQueue, 1)
         if type(path) == "string" and path ~= "" then
           iconCache[job.key] = path
-          iconCacheDirty = true
+          iconStore.dirty = true
           resolved = resolved + 1
         else
           iconCache[job.key] = false
@@ -2765,9 +3217,9 @@ function onFrameTick(_deltaMs)
       if #iconQueue == 0 then
         -- Draw every resolved icon in one pass instead of one rebuild per
         -- batch, and persist the cache now that the queue is settled.
-        if iconCacheDirty then
+        if iconStore.dirty then
           saveIconCache()
-          iconCacheDirty = false
+          iconStore.dirty = false
         end
       end
     end
@@ -2793,7 +3245,9 @@ function onOpen(context)
   getApplications(false)
   resolvePinned()
   mode = "normal"
-  lastRightIndex = nil
+  folderOpen = nil
+  folderResults = {}
+  lastRight.index = nil
   query = type(context) == "string" and context or ""
   providerId = "" -- force a provider reset for the new session
   catFilter = "all"
@@ -2801,9 +3255,9 @@ function onOpen(context)
   hoverIndex = nil
   keyboardFocus = true
   scrollRev = scrollRev + 1
-  calcResult = nil
-  calcFor = nil
-  calcPending = false
+  calc.result = nil
+  calc.expression = nil
+  calc.pending = false
   focusInput()
   refresh()
   render()
@@ -2815,8 +3269,10 @@ function onClose()
   hoverIndex = nil
   keyboardFocus = true
   mode = "normal"
-  lastRightIndex = nil
+  folderOpen = nil
+  folderResults = {}
+  lastRight.index = nil
   appRefreshPending = false
-  calcSeq = calcSeq + 1
+  calc.seq = calc.seq + 1
   panel.setNeedsFrameTick(false)
 end

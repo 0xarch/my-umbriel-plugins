@@ -55,6 +55,24 @@ Applications launch through `gio launch` with the entry's `Exec` as a fallback.
 Windows use Umbriel's `window-focus` action, and session actions call
 `noctalia msg session <action>`.
 
+## Folders
+
+The stored layout can hold folders alongside applications. A folder row keeps
+its members as desktop paths in their own display order, and membership is
+exclusive: a folded application has no top-level row, so it appears only
+inside its folder (a typed search still finds it).
+
+- In the app grid a folder renders as a rounded tile with up to four member
+  icons (missing members get empty placeholders) and the member count.
+- Clicking it opens a subview over a scrim that covers the whole panel,
+  including the search bar. The subview shows the members with the same tiles
+  as the main view; clicking the scrim (outside the subview) or the header's
+  close button returns to the grid.
+- Folders are stored in `order.json` as `{ type = "folder", id = "folder-N",
+  name = ..., entries = { ... } }` next to the application rows. A hand-written
+  folder without an id gets one assigned on load, and new applications are
+  always appended to the top level, never into a folder.
+
 ## Layout editor
 
 The empty query lists applications in a stored order instead of by usage. The
@@ -63,14 +81,16 @@ shows up at the end on its first launch. The editor is separate from the normal
 mode: no search field, just the stored layout with the same tiles.
 
 - Drag a tile onto another one to reorder; the dragged app takes the target
-  slot. The full order is written to `order.json` under the plugin data
-  directory after every change.
+  slot. Folders take part in the same drag order, and dropping an application
+  on a folder adds it. The full order is written to `order.json` under the
+  plugin data directory after every change.
 - The shell's `shell.launcher.pinned` list seeds the front of the layout the
   first time an app is seen. Pin and Unpin from the context menu move the app
   into or out of the pinned block, and the result is stored in `order.json`
   rather than written back to the shell config.
-- Each row in `order.json` carries a `type` (`"app"` today) and any extra keys
-  are preserved, so folder rows can be added without invalidating a store.
+- Each row in `order.json` carries a `type` (`"app"` or `"folder"`) and any
+  extra keys are preserved, so future row kinds can be added without
+  invalidating a store.
 
 ## Settings
 

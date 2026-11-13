@@ -102,6 +102,12 @@
     "done": "完成",
     "empty": "还没有可以排列的应用。"
   },
+  "folder": {
+    "new": "新建文件夹",
+    "count": "{count} 个应用",
+    "empty": "这个文件夹是空的。",
+    "close": "关闭"
+  },
   "origin": {
     "flatpak": "Flatpak",
     "snap": "Snap",

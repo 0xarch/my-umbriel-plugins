@@ -102,6 +102,12 @@
     "done": "Done",
     "empty": "No applications to arrange yet."
   },
+  "folder": {
+    "new": "New Folder",
+    "count": "{count} apps",
+    "empty": "This folder is empty.",
+    "close": "Close"
+  },
   "origin": {
     "flatpak": "Flatpak",
     "snap": "Snap",
