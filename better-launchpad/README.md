@@ -117,6 +117,14 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   `LANG`: `Name[zh_CN]` (and the `GenericName`, `Comment`, and `Keywords`
   variants) wins over the untranslated value, and every translation stays
   searchable as an alias.
+- Tiles are built from fixed-height bands (badges, icon, clipped two-line name,
+  origin badge), so the icon and the title's top edge stay put regardless of
+  how the name wraps.
+- Large catalogs render in chunks of ten results per frame, and icon-theme
+  lookups run in a separate frame pass with a small time budget. Resolved icon
+  paths are cached in `icon-cache.json` under the plugin data directory, so
+  reopening the panel draws every icon immediately; entries whose file no
+  longer exists (theme switch, uninstall) are dropped on load.
 - Flatpak and Snap entries show a package badge in the tile's bottom-right
   corner, and AppImage entries show the AppImage badge there. The badge's origin
   label appears as the tile tooltip.

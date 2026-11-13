@@ -1797,10 +1797,56 @@ end
 
 -- Icon-theme lookups are the expensive part of a grid render, and they stack
 -- with the tree rebuild when they run inside it. Render with cached paths and
--- glyph fallbacks only; queued names are resolved one per frame tick, and a
--- frame either looks an icon up or rebuilds the tree, never both.
+-- glyph fallbacks only; queued names are resolved during frame ticks within a
+-- small time budget, and a frame either looks icons up or rebuilds the tree.
+-- Resolved paths persist in the plugin data directory, so reopening the panel
+-- draws every icon immediately.
+local ICON_CACHE_VERSION = 1
+local ICON_LOOKUP_BUDGET_MS = 10
 local iconQueue = {}
 local iconQueued = {}
+local iconCacheLoaded = false
+local iconCacheDirty = false
+
+local function iconCacheFile()
+  local dataDir = noctalia.pluginDataDir()
+  if type(dataDir) ~= "string" or dataDir == "" then
+    return nil
+  end
+  return dataDir .. "/icon-cache.json"
+end
+
+local function loadIconCache()
+  if iconCacheLoaded then
+    return
+  end
+  iconCacheLoaded = true
+  local path = iconCacheFile()
+  local stored = path ~= nil and readJson(path) or nil
+  if type(stored) ~= "table" or stored.version ~= ICON_CACHE_VERSION or type(stored.icons) ~= "table" then
+    return
+  end
+  for key, value in pairs(stored.icons) do
+    -- A theme switch or uninstall leaves dead paths behind; drop them here.
+    if type(value) == "string" and value ~= "" and noctalia.fileExists(value) then
+      iconCache[key] = value
+    end
+  end
+end
+
+local function saveIconCache()
+  local path = iconCacheFile()
+  if path == nil then
+    return
+  end
+  local icons = {}
+  for key, value in pairs(iconCache) do
+    if type(value) == "string" then
+      icons[key] = value
+    end
+  end
+  writeJson(path, { version = ICON_CACHE_VERSION, icons = icons })
+end
 
 local function queueIcon(name, size)
   if type(name) ~= "string" or name == "" or type(size) ~= "number" then
@@ -1974,7 +2020,7 @@ local function tileCard(result, focused, key, pinned)
     ui.row({ height = TILE_ICON_BAND, justify = "center", align = "center" }, {
       iconNode(result, iconWidth, iconHeight),
     }),
-    ui.row({ height = TILE_NAME_BAND, align = "center", justify = "center", clip = true }, {
+    ui.column({ height = TILE_NAME_BAND, align = "center", justify = "center", clip = true }, {
       ui.label({
         text = result.title,
         fontSize = 11,
@@ -2180,13 +2226,15 @@ local function editTile(row, position)
     pinned = row.pinned == true,
   }
   local card = tileCard(result, false, "ecard-" .. position, row.pinned == true)
+  -- The wrappers stay invisible: only the card paints, so an editor tile looks
+  -- exactly like a normal one. The zone is a column so the source stretches
+  -- across the cell, and the source grows so the card fills it.
   return ui.dropZone({
     key = "ezone-" .. position,
     height = TILE_HEIGHT,
     flexGrow = 1,
+    direction = "column",
     align = "stretch",
-    fill = "surface/0",
-    radius = 10,
     accepts = { DRAG_TYPE },
     value = tostring(position),
     onDrop = "onReorderDrop",
@@ -2196,9 +2244,8 @@ local function editTile(row, position)
       payload = row.id,
       previewAncestor = 0,
       height = TILE_HEIGHT,
+      flexGrow = 1,
       align = "stretch",
-      fill = "surface/0",
-      radius = 10,
     }, { card }),
   })
 end
@@ -2668,13 +2715,26 @@ function onFrameTick(_deltaMs)
     needsRender = true
   end
   if #iconQueue > 0 then
-    local job = table.remove(iconQueue, 1)
-    local path = noctalia.appIconPath(job.name, job.size)
-    if type(path) == "string" and path ~= "" then
-      iconCache[job.key] = path
-      needsRender = true
-    else
-      iconCache[job.key] = false
+    local started = os.clock()
+    local resolved = false
+    while #iconQueue > 0 do
+      local job = table.remove(iconQueue, 1)
+      local path = noctalia.appIconPath(job.name, job.size)
+      if type(path) == "string" and path ~= "" then
+        iconCache[job.key] = path
+        iconCacheDirty = true
+        resolved = true
+      else
+        iconCache[job.key] = false
+      end
+      if (os.clock() - started) * 1000 >= ICON_LOOKUP_BUDGET_MS then
+        break
+      end
+    end
+    needsRender = needsRender or resolved
+    if #iconQueue == 0 and iconCacheDirty then
+      saveIconCache()
+      iconCacheDirty = false
     end
   end
   if needsRender or #iconQueue > 0 then
@@ -2689,6 +2749,7 @@ function onOpen(context)
   isOpen = true
   config = loadConfig()
   loadUsage()
+  loadIconCache()
   loadOrder()
   getApplications(false)
   resolvePinned()
