@@ -150,7 +150,10 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   origin badge), so the icon and the title's top edge stay put regardless of
   how the name wraps.
 - Large catalogs render in chunks of ten results per frame, and icon-theme
-  lookups run in a separate frame pass with a small time budget. Resolved icon
+  lookups run in a separate frame pass with a small time budget. The layout
+  editor uses the same chunking (and never queues icon lookups), so opening it
+  with a large catalog cannot overrun the 25 ms callback budget and make the
+  host disable the panel. Resolved icon
   paths are cached in `icon-cache.json` under the plugin data directory, so
   reopening the panel draws every icon immediately; entries whose file no
   longer exists (theme switch, uninstall) are dropped on load.
@@ -163,6 +166,9 @@ directory, so uninstalling the plugin does not disturb the shell's history.
 - A panel control cannot host children, so each tile is a card plus a
   transparent button stretched over it with the compositing `translateY` prop.
   That button is what receives clicks, hover, and right-clicks.
+- The folder subview reuses those tiles, so its overlay keys repeat the grid's.
+  Pointer focus is scoped to the list that owns the hover: a hover inside the
+  subview never highlights the card at the same index under the scrim.
 - The native context menu can only be opened from a live pointer callback, so
   there is no keyboard-only equivalent of the right-click menu.
 

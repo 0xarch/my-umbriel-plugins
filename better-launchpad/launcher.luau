@@ -215,6 +215,8 @@ local order = nil
 local orderPath = nil
 local mode = "normal"
 local editDragMode = "swap"
+local hoverFolder = false
+local editShown = 0
 local lastRight = { index = nil, at = 0 }
 local forceList = false
 local resultsShown = 0
@@ -836,7 +838,6 @@ local function moveOrderRow(fromId, toPosition)
   table.insert(store.entries, target, row)
   saveOrder()
   reindexOrder()
-  render()
   return true
 end
 
@@ -2135,6 +2136,13 @@ local function queueIcon(name, size)
   if type(name) ~= "string" or name == "" or type(size) ~= "number" then
     return
   end
+  -- The layout editor redraws every stored tile on each change; a lookup queue
+  -- there would re-render the whole grid per icon batch. Cached paths and the
+  -- glyph fallback are enough, and entering the editor from the grid has
+  -- already warmed the cache for every visible app.
+  if mode == "edit" then
+    return
+  end
   local key = name .. "@" .. tostring(size)
   if iconCache[key] ~= nil or iconQueued[key] then
     return
@@ -2225,11 +2233,14 @@ local function originBadge(origin, size)
   })
 end
 
-local function isFocused(index)
+-- The folder subview reuses the result tiles, so its overlays report the same
+-- ov-N keys as the main grid. The scope keeps a hover in one list from lighting
+-- the same index in the other (the scrim would show the card underneath).
+local function isFocused(index, inFolder)
   if hoverIndex ~= nil then
-    return hoverIndex == index
+    return (hoverFolder == true) == (inFolder == true) and hoverIndex == index
   end
-  return keyboardFocus and selected == index
+  return keyboardFocus and inFolder ~= true and selected == index
 end
 
 local TILE_HEIGHT = 108
@@ -2351,14 +2362,14 @@ local function folderTile(result, index, list)
     gap = 0,
     align = "stretch",
   }, {
-    folderCard(result, isFocused(index), "card-" .. index),
+    folderCard(result, isFocused(index, list == folderResults), "card-" .. index),
     resultOverlay(result, index, TILE_HEIGHT, list),
   })
 end
 
 local function folderListRow(result, index, list)
   return ui.column({ key = "res-" .. index, height = ROW_HEIGHT, gap = 0, align = "stretch" }, {
-    listCard(result, isFocused(index), "card-" .. index),
+    listCard(result, isFocused(index, list == folderResults), "card-" .. index),
     resultOverlay(result, index, ROW_HEIGHT, list),
   })
 end
@@ -2421,7 +2432,7 @@ local function tile(result, index, list)
     gap = 0,
     align = "stretch",
   }, {
-    tileCard(result, isFocused(index), "card-" .. index, result.pinned),
+    tileCard(result, isFocused(index, list == folderResults), "card-" .. index, result.pinned),
     resultOverlay(result, index, TILE_HEIGHT, list),
   })
 end
@@ -2469,7 +2480,7 @@ local function listRow(result, index, list)
     return folderListRow(result, index, list)
   end
   return ui.column({ key = "res-" .. index, height = ROW_HEIGHT, gap = 0, align = "stretch" }, {
-    listCard(result, isFocused(index), "card-" .. index),
+    listCard(result, isFocused(index, list == folderResults), "card-" .. index),
     resultOverlay(result, index, ROW_HEIGHT, list),
   })
 end
@@ -2576,53 +2587,62 @@ local function editHeader()
           return
         end
         editDragMode = id
-        render()
+        flags.render = true
+        panel.setNeedsFrameTick(true)
       end,
     })
   end
   local hint = editDragMode == "folder"
       and T("edit.hint_folder", "Drag an app onto another app to make a folder")
       or T("edit.hint", "Drag a tile onto another to reorder")
-  return ui.row({
-    height = 46,
-    gap = 8,
+  -- Two rows: the title shares its row only with the short "Done" button, so a
+  -- long localized hint can never push that button out of the visible header.
+  return ui.column({
+    gap = 4,
     paddingH = 12,
-    align = "center",
+    paddingV = 8,
     fill = "surface_container",
     radius = 12,
     border = "outline_variant",
     borderWidth = 1,
   }, {
-    ui.glyph({ name = "layout-grid", size = 18, color = "primary" }),
-    ui.column({ gap = 0, flexGrow = 1, align = "start" }, {
+    ui.row({ height = 30, gap = 8, align = "center" }, {
+      ui.glyph({ name = "layout-grid", size = 18, color = "primary" }),
       ui.label({
         text = T("edit.title", "Edit layout"),
         fontSize = 14,
         fontWeight = "semibold",
         color = "on_surface",
         maxLines = 1,
+        flexGrow = 1,
       }),
+      ui.button({
+        key = "edit-done",
+        text = T("edit.done", "Done"),
+        variant = "secondary",
+        controlSize = "sm",
+        onClick = function() exitEditMode() end,
+      }),
+    }),
+    ui.row({ gap = 8, align = "center" }, {
       ui.label({
         text = hint,
         fontSize = 11,
         color = "on_surface_variant",
         maxLines = 1,
+        maxWidth = 330,
+        flexGrow = 1,
       }),
-    }),
-    ui.row({
-      gap = 2,
-      padding = 2,
-      align = "center",
-      fill = "surface_container_high",
-      radius = 9,
-    }, {
-      modeButton("swap", T("edit.mode_swap", "Swap"), "arrows-move"),
-      modeButton("folder", T("edit.mode_folder", "Folder"), FOLDER_GLYPH),
-    }),
-    ui.button({
-      text = T("edit.done", "Done"),
-      variant = "secondary",
-      onClick = function() exitEditMode() end,
+      ui.row({
+        gap = 2,
+        padding = 2,
+        align = "center",
+        fill = "surface_container_high",
+        radius = 9,
+      }, {
+        modeButton("swap", T("edit.mode_swap", "Swap"), "arrows-move"),
+        modeButton("folder", T("edit.mode_folder", "Folder"), FOLDER_GLYPH),
+      }),
     }),
   })
 end
@@ -2671,19 +2691,30 @@ local function editTile(row, position)
   })
 end
 
+-- Building every editor tile in one callback costs more than the 25 ms budget
+-- (64 rows x wrapper + card > 1000 nodes) and the host disables a panel that
+-- times out repeatedly, so the grid grows in chunks like the result grid does.
 local function editNodes()
   local nodes = {}
   local row = {}
+  local shown = 0
+  local total = 0
   for position, entry in ipairs(loadOrder().entries) do
-    local node = nil
     if entry.type == "folder" or entry.type == "app" then
-      node = editTile(entry, position)
-    end
-    if node ~= nil then
-      row[#row + 1] = node
-      if #row == 5 then
-        nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
-        row = {}
+      total = total + 1
+      if shown < editShown then
+        -- Count the attempt, not the node: an app whose desktop entry vanished
+        -- renders nothing, and the counter must still advance or the chunked
+        -- grid would schedule frames forever.
+        shown = shown + 1
+        local node = editTile(entry, position)
+        if node ~= nil then
+          row[#row + 1] = node
+          if #row == 5 then
+            nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
+            row = {}
+          end
+        end
       end
     end
   end
@@ -2693,6 +2724,7 @@ local function editNodes()
     end
     nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
   end
+  flags.more = shown < total
   return nodes
 end
 
@@ -2721,6 +2753,8 @@ openFolder = function(row)
   folderOpen = row
   folderResults = buildFolderResults(row)
   hoverIndex = nil
+  hoverFolder = false
+  keyboardFocus = false
   selected = 1
   inputRev = inputRev + 1
   render()
@@ -2733,6 +2767,7 @@ closeFolder = function()
   folderOpen = nil
   folderResults = {}
   hoverIndex = nil
+  hoverFolder = false
   keyboardFocus = true
   inputRev = inputRev + 1
   render()
@@ -2745,6 +2780,7 @@ enterEditMode = function()
   closeFolder()
   mode = "edit"
   editDragMode = "swap"
+  editShown = RESULTS_PER_FRAME
   hoverIndex = nil
   keyboardFocus = true
   lastRight.index = nil
@@ -2785,25 +2821,26 @@ function onReorderDrop(payload, value)
       return
     end
     if row.type == "folder" then
-      if addToFolder(row.id, payload) then
-        render()
-      end
+      addToFolder(row.id, payload)
     elseif row.type == "app" then
-      local folder = createFolderWithApps({ row.id, payload }, nil, row.id)
-      if folder ~= nil then
-        render()
-      end
+      createFolderWithApps({ row.id, payload }, nil, row.id)
     end
+    -- The drop callback shares the 25 ms budget with the store write, so the
+    -- grid rebuild waits for the next frame tick instead of running here.
+    flags.render = true
+    panel.setNeedsFrameTick(true)
     return
   end
   -- Swap mode: reordering, but dropping an application on a folder folds it in.
   if row.type == "folder" and dragged.type == "app" then
-    if addToFolder(row.id, payload) then
-      render()
-    end
+    addToFolder(row.id, payload)
+    flags.render = true
+    panel.setNeedsFrameTick(true)
     return
   end
   moveOrderRow(payload, value)
+  flags.render = true
+  panel.setNeedsFrameTick(true)
 end
 
 -- The folder subview floats over a scrim that covers the whole panel,
@@ -3236,6 +3273,7 @@ function onResultHover(state, key)
       return
     end
     hoverIndex = index
+    hoverFolder = folderOpen ~= nil
     keyboardFocus = false
     selected = index
     render()
@@ -3243,6 +3281,7 @@ function onResultHover(state, key)
     -- The host reports a leave only for the tile that owns the hover, so any
     -- leave clears the pointer focus even if its key is not the one we stored.
     hoverIndex = nil
+    hoverFolder = false
     keyboardFocus = false
     render()
   end
@@ -3299,7 +3338,11 @@ function onFrameTick(_deltaMs)
       needsRender = true
     end
     if flags.more then
-      resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
+      if mode == "edit" then
+        editShown = editShown + RESULTS_PER_FRAME
+      else
+        resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
+      end
       needsRender = true
     end
     local drained = false
@@ -3346,8 +3389,19 @@ function onFrameTick(_deltaMs)
       needsRender = true
     end
   end
-  if needsRender or #iconQueue > 0 or flags.icons then
-    render()
+  if needsRender or flags.icons then
+    -- A render that overruns unwinds mid-tree; without this guard the pending
+    -- flags would retry every frame until the host disables the panel.
+    local ok = pcall(render)
+    if not ok then
+      flags.more = false
+      flags.icons = false
+      flags.render = false
+      iconQueue = {}
+      iconQueued = {}
+      panel.setNeedsFrameTick(false)
+      return
+    end
   end
   if #iconQueue == 0 and not flags.more and not flags.icons and not flags.render then
     panel.setNeedsFrameTick(false)
