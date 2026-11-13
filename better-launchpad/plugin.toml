@@ -6,7 +6,7 @@
 
 id = "io.soloev/better-launchpad"
 name = "Better Launchpad"
-version = "0.5.6"
+version = "0.5.7"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"

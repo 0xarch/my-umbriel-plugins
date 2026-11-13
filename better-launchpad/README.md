@@ -67,10 +67,10 @@ inside its folder (a typed search still finds it).
   the layout editor only; the normal grid keeps the origin band empty. A new
   folder is named after `folder.new` in the translations, numbered when that
   name is taken.
-- Clicking it opens a subview over a scrim that covers the whole panel,
-  including the search bar. The subview shows the members with the same tiles
-  as the main view; clicking the scrim (outside the subview) or the header's
-  close button returns to the grid.
+- Clicking it opens a subview over a scrim that covers the whole panel card,
+  including the search bar and the host's content inset. The subview shows the
+  members with the same tiles as the main view; clicking the scrim (outside the
+  subview) or the header's close button returns to the grid.
 - Folders are stored in `order.json` as `{ type = "folder", id = "folder-N",
   name = ..., entries = { ... } }` next to the application rows. A hand-written
   folder without an id gets one assigned on load, and new applications are
@@ -180,16 +180,23 @@ directory, so uninstalling the plugin does not disturb the shell's history.
 - The plugin API has no transition or animation props, so the panel animates
   itself from `onFrameTick`: it fades and rises in over 180 ms on open (the host's
   own reveal runs before the script's first tree exists, so it is not visible
-  here), and the folder subview's scrim fades in and out over 160 ms. The card
-  itself is never scaled or translated: a transformed clipped flex leaves the
-  visual bounds disagreeing with its layout box, which shows up as asymmetric
-  gaps at the panel edges. Progress
+  here), and the folder subview's scrim fades in and out over 250 ms. The card
+  itself is never scaled or translated, and the easing is applied to the distance
+  travelled so the closing scrim fades instead of lingering and snapping away.
+  Progress
   is measured against `noctalia.nowMs`, not the frame delta, because the first
   delta after an idle surface can span the whole gap and would skip the fade in
   one step; each step is also capped at ~2 frames so a single slow frame (the
   first layout after a click measured ~97 ms) costs one step, not the fade. Each
   step is a normal render, and the frame loop stays alive until the progress
   reaches its target.
+- Noctalia lays the plugin tree out inside its own `Style::panelPadding` (14 px)
+  inset on every side, so the tree only owns 532x472 of the 560x500 card. The
+  scrim is sized to the card and shifted back out by one content height plus the
+  inset; sizing it to the tree instead leaves the card's padding visible on the
+  left, top and right while spilling past the card at the bottom. Its radius
+  matches `Style::radiusXl` so it never paints square corners over the card's
+  rounding.
 - The folder subview reuses those tiles, so its overlay keys repeat the grid's.
   Pointer focus is scoped to the list that owns the hover: a hover inside the
   subview never highlights the card at the same index under the scrim.

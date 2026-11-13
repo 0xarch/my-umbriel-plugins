@@ -245,19 +245,42 @@ local anim = {
   openMs = 180,
   openAt = nil,
   folder = 0,
-  folderMs = 160,
+  folderMs = 250,
   folderTarget = 0,
+  -- The value the current transition started from, so the fade can be eased
+  -- over the distance travelled in either direction.
+  folderFrom = 0,
   folderAt = nil,
   -- A frame can arrive late (the first layout after a click measured ~97 ms),
-  -- and one such gap would skip most of a 160 ms fade. Each step advances at
-  -- most this much, so a dropped frame costs one step instead of the whole
+  -- and one such gap would skip most of the fade. Each step advances at most
+  -- this much, so a dropped frame costs one step instead of the whole
   -- animation.
   maxStep = 34,
 }
 
+-- Cubic reads as a snappy reveal for the panel itself; the scrim uses a
+-- quad so its tail is long enough to be seen as a fade rather than a pop.
 anim.ease = function(t)
   local inv = 1 - t
   return 1 - inv * inv * inv
+end
+
+anim.easeOut = function(t)
+  local inv = 1 - t
+  return 1 - inv * inv
+end
+
+-- Opacity of the whole overlay. `anim.folder` moves linearly toward the target,
+-- so easing has to be applied to the distance travelled: with a raw easeOut the
+-- closing scrim would stay opaque for most of the fade and then snap away.
+anim.folderOpacity = function()
+  local from, target = anim.folderFrom, anim.folderTarget
+  if from == target then
+    return anim.folder
+  end
+  local p = (anim.folder - from) / (target - from)
+  p = math.min(1, math.max(0, p))
+  return from + (target - from) * anim.easeOut(p)
 end
 
 -- Advance both animations to the current wall clock. Returns true when the tree
@@ -319,6 +342,7 @@ anim.resetFolder = function()
   folderResults = {}
   anim.folder = 0
   anim.folderTarget = 0
+  anim.folderFrom = 0
   anim.folderAt = nil
 end
 
@@ -3189,6 +3213,7 @@ openFolder = function(row)
   -- Reopening mid-close continues from the current progress instead of
   -- snapping the subview back to invisible.
   anim.folderTarget = 1
+  anim.folderFrom = anim.folder
   anim.folderAt = nil
   hoverIndex = nil
   hoverFolder = false
@@ -3206,6 +3231,7 @@ closeFolder = function()
   -- Keep the subview in the tree while it fades; the frame tick drops it once
   -- the progress reaches zero, and the mask swallows clicks meanwhile.
   anim.folderTarget = 0
+  anim.folderFrom = anim.folder
   anim.folderAt = nil
   hoverIndex = nil
   hoverFolder = false
@@ -3312,13 +3338,32 @@ function onReorderDrop(payload, value)
   end
 end
 
--- The folder subview floats over a scrim that covers the whole panel,
--- including the search bar. The root gets the panel's exact height so the
--- mask can composite over it; clicks outside the subview land on the mask.
-local PANEL_HEIGHT = 500
+-- The folder subview floats over a scrim that covers the whole panel card,
+-- including the search bar and the host's content inset; clicks outside the
+-- subview land on the mask.
+--
+-- Two geometries have to be reconciled here. The manifest declares a 560x500
+-- panel, but Noctalia lays the plugin tree out inside its own
+-- Style::panelPadding (14 logical px) inset on every side, so the tree only
+-- owns 532x472 of the card. A scrim sized to the tree therefore stopped at the
+-- inset on the left, top and right while a panel-sized scrim spilled past the
+-- card at the bottom, so the mask is sized to the card and shifted back out
+-- onto it. The wrapper around it is left unclipped for that overflow.
+--
+-- Kept in one table because the main chunk is at Luau's 200-local cap.
+local PANEL = {
+  width = 560,
+  height = 500,
+  padding = 14,
+  contentWidth = 560 - 14 * 2,
+  contentHeight = 500 - 14 * 2,
+  -- Style::radiusXl: the card's corner radius in logical pixels. Matching it
+  -- keeps the scrim from painting its square corners over the card's rounding.
+  radius = 12,
+}
 
 local function folderMask()
-  local progress = anim.ease(anim.folder)
+  local progress = anim.folderOpacity()
   local body = nil
   if #folderResults == 0 then
     body = ui.label({
@@ -3374,8 +3419,14 @@ local function folderMask()
   -- at the panel edges while it opens or closes.
   local mask = ui.column({
     key = "folder-mask",
-    height = PANEL_HEIGHT,
-    translateY = -PANEL_HEIGHT,
+    width = PANEL.width,
+    height = PANEL.height,
+    -- The mask is the wrapper's second child, i.e. one content height below the
+    -- tree's origin. Shifting it back by that plus the host inset lands it on
+    -- the card's top-left corner, so it covers the card exactly.
+    translateX = -PANEL.padding,
+    translateY = -(PANEL.contentHeight + PANEL.padding),
+    radius = PANEL.radius,
     fill = "scrim/0.55",
     align = "center",
     justify = "center",
@@ -3409,12 +3460,22 @@ function render()
     root.props.translateY = (1 - fade) * 10
   end
   if folderOpen ~= nil and mode == "normal" then
-    -- The content keeps the panel's height so the mask, which sits one panel
-    -- height below it, composites exactly over the whole panel after its
-    -- translateY. The wrapper clips the overflow, so the measured height stays
-    -- at PANEL_HEIGHT.
-    root = ui.column({ key = "panel-root", height = PANEL_HEIGHT, gap = 0, clip = true }, {
-      ui.column({ height = PANEL_HEIGHT, gap = 10 }, { root }),
+    -- The host gives the plugin tree the panel size minus its 14 px inset on
+    -- every side. Keep the normal content in that exact area; the mask is
+    -- deliberately larger and paints into the host's inset around it.
+    root = ui.column({
+      key = "panel-root",
+      width = PANEL.contentWidth,
+      height = PANEL.contentHeight,
+      gap = 0,
+      align = "start",
+    }, {
+      ui.column({
+        width = PANEL.contentWidth,
+        height = PANEL.contentHeight,
+        gap = 10,
+        clip = true,
+      }, { root }),
       folderMask(),
     })
   end

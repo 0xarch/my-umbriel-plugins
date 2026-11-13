@@ -5,7 +5,7 @@
 [[plugin]]
 id = "io.soloev/better-launchpad"
 name = "Better Launchpad"
-version = "0.5.6"
+version = "0.5.7"
 author = "io.soloev"
 license = "MIT"
 icon = "rocket"
