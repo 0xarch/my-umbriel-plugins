@@ -89,5 +89,10 @@
       "label": "按钮图标",
       "description": "栏上启动按钮显示的图标。"
     }
+  },
+  "origin": {
+    "flatpak": "Flatpak",
+    "snap": "Snap",
+    "appimage": "AppImage"
   }
 }

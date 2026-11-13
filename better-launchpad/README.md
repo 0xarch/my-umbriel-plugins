@@ -27,6 +27,7 @@ noctalia msg panel-toggle io.soloev/better-launchpad:launchpad
 | Input | Effect |
 | ----- | ------ |
 | Type | Fuzzy-search applications; `/` at the start searches providers |
+| Hover | Move the focus to the app under the pointer; leaving the results clears it |
 | Up / Down | Move by one row; in a grid, also by one tile with Left / Right |
 | Enter | Launch the selected app, copy an emoji or result, apply a wallpaper, run a session action, or focus a window |
 | Esc | Close the panel |
@@ -92,6 +93,12 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   `OnlyShowIn`, and `NotShowIn` follow the desktop-entry spec. Entries are parsed
   by `scan-apps.sh` (the same awk approach as `better-taskbar`); the panel decodes
   its JSON asynchronously and renders on the next frame.
+- Display names follow the system language from `LC_ALL`, `LC_MESSAGES`, then
+  `LANG`: `Name[zh_CN]` (and the `GenericName`, `Comment`, and `Keywords`
+  variants) wins over the untranslated value, and every translation stays
+  searchable as an alias.
+- Flatpak and Snap entries show a package badge, and AppImage entries show the
+  AppImage badge. The badge's origin label appears as the tile tooltip.
 - Usage boosting only applies when `shell.launcher.sort_by_usage` is enabled.
 
 ## Development

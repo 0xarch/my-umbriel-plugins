@@ -186,6 +186,8 @@ local query = ""
 local inputRev = 0
 local scrollRev = 0
 local selected = 1
+local hoverIndex = nil
+local keyboardFocus = true
 local results = {}
 local providerId = "Applications"
 local providerQuery = ""
@@ -382,19 +384,6 @@ local function recordUsage(provider, id)
 end
 
 -- ── desktop entries ─────────────────────────────────────────────────────────
-
-local function originSuffix(origin)
-  if origin == "Flatpak" then
-    return " · Flatpak"
-  elseif origin == "Snap" then
-    return " · Snap"
-  elseif origin == "Nix" then
-    return " · Nix"
-  elseif origin == "AppImage" then
-    return " · AppImage"
-  end
-  return ""
-end
 
 -- ── application discovery ───────────────────────────────────────────────────
 
@@ -990,14 +979,11 @@ local function appResult(entry, score)
   if subtitle == nil or subtitle == "" then
     subtitle = entry.comment
   end
-  local suffix = originSuffix(entry.origin)
-  if suffix ~= "" then
-    subtitle = (subtitle or "") .. suffix
-  end
   return {
     provider = "Applications",
     id = entry.path,
     entry = entry,
+    origin = entry.origin,
     title = entry.name,
     titleLower = entry.nameLower,
     subtitle = subtitle or "",
@@ -1644,41 +1630,102 @@ local function iconNode(result, width, height)
   return ui.glyph({ name = result.glyph or "app-window", size = math.floor(height * 0.7), color = "on_surface_variant" })
 end
 
+-- The shell marks Flatpak/Snap and AppImage entries with a small glyph; other
+-- origins stay unmarked.
+local ORIGIN_GLYPHS = {
+  Flatpak = "package",
+  Snap = "package",
+  AppImage = "settings-automation",
+}
+
+local ORIGIN_LABELS = {
+  Flatpak = { "origin.flatpak", "Flatpak" },
+  Snap = { "origin.snap", "Snap" },
+  AppImage = { "origin.appimage", "AppImage" },
+}
+
+local function originLabel(origin)
+  local label = ORIGIN_LABELS[origin]
+  if label == nil then
+    return nil
+  end
+  return T(label[1], label[2])
+end
+
+local function originBadge(origin, size)
+  local glyph = ORIGIN_GLYPHS[origin]
+  if glyph == nil then
+    return nil
+  end
+  return ui.row({
+    width = size,
+    height = size,
+    align = "center",
+    justify = "center",
+  }, {
+    ui.glyph({ name = glyph, size = size, color = "on_surface_variant" }),
+  })
+end
+
+local function isFocused(index)
+  if hoverIndex ~= nil then
+    return hoverIndex == index
+  end
+  return keyboardFocus and selected == index
+end
+
 local function tile(result, index)
   local fill = nil
-  if selected == index then
+  if isFocused(index) then
     fill = "primary/0.16"
   end
   local iconWidth, iconHeight = 40, 40
   if result.imagePath ~= nil then
     iconWidth, iconHeight = 74, 40
   end
-  local children = { iconNode(result, iconWidth, iconHeight) }
-  children[#children + 1] = ui.label({
-    text = result.title,
-    fontSize = 11,
-    maxLines = 2,
-    textAlign = "center",
-    color = selected == index and "on_surface" or "on_surface_variant",
-    height = 26,
+
+  local pinBadge = nil
+  if result.pinned then
+    pinBadge = ui.row({ width = 12, height = 12, align = "center", justify = "center" }, {
+      ui.glyph({ name = "pin-filled", size = 11, color = "primary" }),
+    })
+  end
+  local badgeRow = ui.row({ height = 12, justify = "space_between", align = "center" }, {
+    pinBadge or ui.spacer({ flexGrow = 1 }),
+    originBadge(result.origin, 12) or ui.spacer({ flexGrow = 1 }),
   })
+
+  local children = {
+    badgeRow,
+    iconNode(result, iconWidth, iconHeight),
+    ui.label({
+      text = result.title,
+      fontSize = 11,
+      maxLines = 2,
+      textAlign = "center",
+      color = isFocused(index) and "on_surface" or "on_surface_variant",
+      height = 24,
+    }),
+  }
   return ui.column({
     key = "res-" .. index,
     flexGrow = 1,
-    height = 86,
-    gap = 4,
-    padding = 5,
+    height = 92,
+    gap = 2,
+    padding = 4,
     align = "center",
     justify = "center",
     radius = 10,
     fill = fill,
+    tooltip = originLabel(result.origin),
+    onHover = "onResultHover",
     onClick = function() activate(index) end,
   }, children)
 end
 
 local function listRow(result, index)
   local fill = nil
-  if selected == index then
+  if isFocused(index) then
     fill = "primary/0.16"
   end
   local text = ui.column({ gap = 1, flexGrow = 1, align = "start" }, {
@@ -1696,15 +1743,15 @@ local function listRow(result, index)
       color = "on_surface_variant",
     }),
   })
-  local right = nil
-  if result.pinned then
-    right = ui.glyph({ name = "pin-filled", size = 14, color = "primary" })
-  elseif result.provider == "Calculator" then
-    right = ui.glyph({ name = "copy", size = 14, color = "on_surface_variant" })
-  end
   local children = { iconNode(result, 32, 32), text }
-  if right ~= nil then
-    children[#children + 1] = right
+  local badge = originBadge(result.origin, 14)
+  if badge ~= nil then
+    children[#children + 1] = badge
+  end
+  if result.pinned then
+    children[#children + 1] = ui.glyph({ name = "pin-filled", size = 14, color = "primary" })
+  elseif result.provider == "Calculator" then
+    children[#children + 1] = ui.glyph({ name = "copy", size = 14, color = "on_surface_variant" })
   end
   return ui.row({
     key = "res-" .. index,
@@ -1715,6 +1762,8 @@ local function listRow(result, index)
     align = "center",
     radius = 10,
     fill = fill,
+    tooltip = originLabel(result.origin),
+    onHover = "onResultHover",
     onClick = function() activate(index) end,
   }, children)
 end
@@ -1854,19 +1903,6 @@ function render()
   end
   root[#root + 1] = body
 
-  local countText = tostring(#results) .. " " .. T("results", "results")
-  if #results == 1 then
-    countText = "1 " .. T("result", "result")
-  end
-  root[#root + 1] = ui.row({ align = "center", justify = "space_between" }, {
-    ui.label({
-      text = T("hint", "↑↓ navigate · Enter open · Esc close"),
-      fontSize = 10,
-      color = "on_surface_variant",
-    }),
-    ui.label({ text = countText, fontSize = 10, color = "on_surface_variant" }),
-  })
-
   panel.render(ui.column({ flexGrow = 1, gap = 10 }, root))
   if iconPending then
     panel.setNeedsFrameTick(true)
@@ -1882,6 +1918,8 @@ end
 function setQuery(value)
   query = value or ""
   selected = 1
+  hoverIndex = nil
+  keyboardFocus = true
   scrollRev = scrollRev + 1
   focusInput()
   refresh()
@@ -1891,6 +1929,8 @@ end
 function setCategory(id)
   catFilter = id
   selected = 1
+  hoverIndex = nil
+  keyboardFocus = true
   scrollRev = scrollRev + 1
   focusInput()
   refresh()
@@ -1907,6 +1947,8 @@ function onQueryChanged(value)
   end
   query = value
   selected = 1
+  hoverIndex = nil
+  keyboardFocus = true
   scrollRev = scrollRev + 1
   refresh()
   render()
@@ -2004,6 +2046,31 @@ local function moveSelection(delta)
   end
   if nextIndex ~= selected then
     selected = nextIndex
+  end
+  hoverIndex = nil
+  keyboardFocus = true
+  render()
+end
+
+function onResultHover(state, key)
+  if not isOpen then
+    return
+  end
+  local index = tonumber(string.match(key or "", "^res%-(%d+)$"))
+  if index == nil then
+    return
+  end
+  if state == "true" then
+    if hoverIndex == index and not keyboardFocus then
+      return
+    end
+    hoverIndex = index
+    keyboardFocus = false
+    selected = index
+    render()
+  elseif hoverIndex == index then
+    hoverIndex = nil
+    keyboardFocus = false
     render()
   end
 end
@@ -2052,6 +2119,8 @@ function onOpen(context)
   providerId = "" -- force a provider reset for the new session
   catFilter = "all"
   selected = 1
+  hoverIndex = nil
+  keyboardFocus = true
   scrollRev = scrollRev + 1
   calcResult = nil
   calcFor = nil
@@ -2064,6 +2133,8 @@ end
 
 function onClose()
   isOpen = false
+  hoverIndex = nil
+  keyboardFocus = true
   appRefreshPending = false
   calcSeq = calcSeq + 1
   panel.setNeedsFrameTick(false)

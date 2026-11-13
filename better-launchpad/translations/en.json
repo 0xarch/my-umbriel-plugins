@@ -89,5 +89,10 @@
       "label": "Button glyph",
       "description": "Glyph shown by the launcher button on the bar."
     }
+  },
+  "origin": {
+    "flatpak": "Flatpak",
+    "snap": "Snap",
+    "appimage": "AppImage"
   }
 }

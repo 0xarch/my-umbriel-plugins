@@ -6,6 +6,10 @@
 # export entries, NoDisplay/Hidden are dropped, and OnlyShowIn/NotShowIn are
 # matched against XDG_CURRENT_DESKTOP.
 #
+# Display strings follow the system language: Name[lang_REGION] (and the
+# GenericName/Comment/Keywords variants) are preferred over the untranslated
+# values, using LC_ALL, LC_MESSAGES, then LANG.
+#
 # Usage: scan-apps.sh [application-dir ...]
 # Without arguments the XDG application directories are searched.
 
@@ -128,21 +132,33 @@ function json_localized(   out, first, i) {
   for (i = 1; i <= local_count; i++) {
     if (!first) out = out ","
     first = 0
-    out = out "\"" jesc(local_names[i]) "\""
+    out = out "\"" jesc(local_values[i]) "\""
   }
   return out "]"
 }
 
-function json_search_names(name_lower,   out, first, i, seen, alias) {
-  out = "[\"" jesc(name_lower) "\"]"
-  first = 0
-  for (i = 1; i <= local_count; i++) {
-    alias = tolower(local_names[i])
-    if (alias == name_lower || (alias in seen)) continue
-    seen[alias] = 1
-    out = substr(out, 1, length(out) - 1) ",\"" jesc(alias) "\"]"
+function json_search_names(name_lower, default_lower,   out, first, i, seen, alias) {
+  out = "["
+  first = 1
+  delete seen
+  if (name_lower != "") {
+    out = out "\"" jesc(name_lower) "\""
+    first = 0
+    seen[name_lower] = 1
   }
-  return out
+  if (default_lower != "" && !(default_lower in seen)) {
+    if (!first) out = out ","
+    first = 0
+    out = out "\"" jesc(default_lower) "\""
+    seen[default_lower] = 1
+  }
+  for (i = 1; i <= local_count; i++) {
+    alias = tolower(local_values[i])
+    if (alias == "" || (alias in seen)) continue
+    seen[alias] = 1
+    out = out ",\"" jesc(alias) "\""
+  }
+  return out "]"
 }
 
 function desktop_matches(only, not_list,   m, desktops, parts, i, j, found, hidden) {
@@ -166,10 +182,125 @@ function desktop_matches(only, not_list,   m, desktops, parts, i, j, found, hidd
   return 1
 }
 
-function origin_of(path,   home, data_home, user_root) {
+# Desktop-entry locales are POSIX-style: lang_COUNTRY.ENCODING@MODIFIER.
+# Keep lang_COUNTRY@modifier so Name[zh_CN] and Name[sr@latin] both match.
+function normalize_desktop_locale(raw,   base, mod, at, n, parts, lang, region, i) {
+  raw = tolower(raw)
+  sub(/\..*$/, "", raw)
+  mod = ""
+  at = index(raw, "@")
+  if (at > 0) {
+    mod = substr(raw, at + 1)
+    raw = substr(raw, 1, at - 1)
+  }
+  gsub(/-/, "_", raw)
+  n = split(raw, parts, "_")
+  if (n < 1 || parts[1] == "") return ""
+  lang = parts[1]
+  region = ""
+  for (i = 2; i <= n; i++) {
+    if (parts[i] ~ /^[A-Za-z][A-Za-z]$/ || parts[i] ~ /^[0-9][0-9][0-9]$/) {
+      region = toupper(parts[i])
+      break
+    }
+  }
+  base = lang
+  if (region != "") base = base "_" region
+  if (mod != "") base = base "@" mod
+  return base
+}
+
+function add_locale(value,   n, parts, i) {
+  if (value == "" || (value in locale_seen)) return
+  locale_seen[value] = 1
+  locale_pref[++locale_count] = value
+}
+
+function init_locales(   raw, c_locale, normalized, lang, region, mod, at, n, parts, i) {
+  locale_count = 0
+  delete locale_seen
+  raw = ENVIRON["LC_ALL"]
+  if (raw == "") raw = ENVIRON["LC_MESSAGES"]
+  if (raw == "") raw = ENVIRON["LANG"]
+  if (raw == "") return
+  c_locale = tolower(raw)
+  sub(/\..*$/, "", c_locale)
+  sub(/@.*$/, "", c_locale)
+  if (c_locale == "" || c_locale == "c" || c_locale == "posix") return
+
+  normalized = normalize_desktop_locale(raw)
+  if (normalized == "") return
+  add_locale(normalized)
+
+  lang = normalized
+  region = ""
+  mod = ""
+  at = index(lang, "@")
+  if (at > 0) {
+    mod = substr(lang, at)
+    lang = substr(lang, 1, at - 1)
+  }
+  n = split(lang, parts, "_")
+  lang = parts[1]
+  if (n > 1) region = "_" parts[2]
+
+  if (mod != "") add_locale(lang mod)
+  if (region != "") add_locale(lang region mod)
+  if (region != "") add_locale(lang region)
+  add_locale(lang)
+}
+
+function local_value(base, fallback,   i, key) {
+  for (i = 1; i <= locale_count; i++) {
+    key = base SUBSEP locale_pref[i]
+    if (key in loc_values) return loc_values[key]
+  }
+  return fallback
+}
+
+function set_localized(base, raw_locale, raw_value,   locale, value) {
+  locale = normalize_desktop_locale(raw_locale)
+  if (locale == "") return
+  value = decode(raw_value)
+  if (value == "") return
+  loc_values[base SUBSEP locale] = value
+  if (base == "Name" && !(locale in name_locale_seen)) {
+    name_locale_seen[locale] = 1
+    local_values[++local_count] = value
+  }
+}
+
+# True when Exec/TryExec starts a *.AppImage program.
+function program_is_appimage(exec,   n, parts, i, prog, base) {
+  exec = decode(exec)
+  sub(/^[ \t]+/, "", exec)
+  n = split(exec, parts, /[ \t]+/)
+  if (n < 1) return 0
+  i = 1
+  prog = parts[i]
+  gsub(/^"/, "", prog)
+  gsub(/"$/, "", prog)
+  if (prog == "env") {
+    i = 2
+    while (i <= n) {
+      prog = parts[i]
+      gsub(/^"/, "", prog)
+      gsub(/"$/, "", prog)
+      if (index(prog, "=") == 0) break
+      i++
+    }
+    if (i > n) return 0
+  }
+  base = prog
+  sub(/^.*\//, "", base)
+  return tolower(base) ~ /\.appimage$/
+}
+
+function origin_of(path, appimage,   home, data_home, user_root) {
   if (index(path, "/flatpak/") && index(path, "/exports/share/applications/")) return "Flatpak"
   if (index(path, "/snap/") || index(path, "/snapd/desktop/applications/")) return "Snap"
   if (index(path, "/nix/store/")) return "Nix"
+  if (appimage) return "AppImage"
   data_home = ENVIRON["XDG_DATA_HOME"]
   home = ENVIRON["HOME"]
   user_root = data_home != "" ? data_home : (home != "" ? home "/.local/share" : "")
@@ -178,21 +309,31 @@ function origin_of(path,   home, data_home, user_root) {
   return "System"
 }
 
-function commit(   id, name, name_lower, generic, keywords, categories) {
+function commit(   id, default_name, default_lower, name, name_lower, generic, generic_lower, keywords, keywords_lower, comment, appimage, integrate) {
   if (current == "") return
   if (tolower(type) != "application") return
-  name = decode(t_name)
-  if (name == "") return
+  default_name = decode(t_name)
+  if (default_name == "") return
   if (is_true(t_hidden) || is_true(t_nodisplay)) return
   if (!desktop_matches(t_only, t_not)) return
 
   id = current
   sub(/^.*\//, "", id)
   sub(/\.desktop$/, "", id)
+  default_lower = tolower(default_name)
+  name = local_value("Name", default_name)
   name_lower = tolower(name)
-  generic = decode(t_generic)
-  keywords = decode(t_keywords)
-  categories = decode(t_categories)
+  generic = local_value("GenericName", decode(t_generic))
+  generic_lower = tolower(generic)
+  comment = local_value("Comment", decode(t_comment))
+  keywords = local_value("Keywords", decode(t_keywords))
+  keywords_lower = tolower(keywords)
+
+  appimage = 0
+  integrate = tolower(t_aiintegrate)
+  if (integrate != "false" && integrate != "0" && integrate != "no") {
+    if (t_aiversion != "" || program_is_appimage(t_tryexec) || program_is_appimage(t_exec)) appimage = 1
+  }
 
   if (count > 0) printf ",\n"
   count++
@@ -202,24 +343,25 @@ function commit(   id, name, name_lower, generic, keywords, categories) {
   printf "\"name\":\"%s\",", jesc(name)
   printf "\"nameLower\":\"%s\",", jesc(name_lower)
   printf "\"generic\":\"%s\",", jesc(generic)
-  printf "\"genericLower\":\"%s\",", jesc(tolower(generic))
-  printf "\"comment\":\"%s\",", jesc(decode(t_comment))
+  printf "\"genericLower\":\"%s\",", jesc(generic_lower)
+  printf "\"comment\":\"%s\",", jesc(comment)
   printf "\"exec\":\"%s\",", jesc(decode(t_exec))
   printf "\"icon\":\"%s\",", jesc(decode(t_icon))
-  printf "\"categories\":\"%s\",", jesc(categories)
+  printf "\"categories\":\"%s\",", jesc(decode(t_categories))
   printf "\"keywords\":\"%s\",", jesc(keywords)
-  printf "\"keywordsLower\":\"%s\",", jesc(tolower(keywords))
+  printf "\"keywordsLower\":\"%s\",", jesc(keywords_lower)
   printf "\"startupWmClass\":\"%s\",", jesc(decode(t_swc))
   printf "\"terminal\":%s,", is_true(t_terminal) ? "true" : "false"
-  printf "\"origin\":\"%s\",", origin_of(current)
+  printf "\"origin\":\"%s\",", origin_of(current, appimage)
   printf "\"localizedNames\":%s,", json_localized()
-  printf "\"searchNames\":%s,", json_search_names(name_lower)
+  printf "\"searchNames\":%s,", json_search_names(name_lower, default_lower)
   printf "\"keywordsList\":%s,", json_list(keywords)
-  printf "\"categoriesList\":%s", json_list(categories)
+  printf "\"categoriesList\":%s", json_list(decode(t_categories))
   printf "}"
 }
 
 BEGIN {
+  init_locales()
   count = 0
   current = ""
   group = ""
@@ -231,9 +373,13 @@ FNR == 1 {
   current = FILENAME
   group = ""
   local_count = 0
+  delete local_values
+  delete name_locale_seen
+  delete loc_values
   type = ""; t_name = ""; t_generic = ""; t_comment = ""; t_exec = ""
   t_icon = ""; t_categories = ""; t_keywords = ""; t_swc = ""
   t_terminal = ""; t_hidden = ""; t_nodisplay = ""; t_only = ""; t_not = ""
+  t_tryexec = ""; t_aiversion = ""; t_aiintegrate = ""
 }
 
 {
@@ -247,8 +393,12 @@ FNR == 1 {
   v = substr(line, p + 1)
   if (k ~ /^[^[]+\[[^]]+\]$/) {
     base = k
+    raw_locale = ""
     sub(/\[.*/, "", base)
-    if (base == "Name") local_names[++local_count] = decode(v)
+    raw_locale = k
+    sub(/^[^[]+\[/, "", raw_locale)
+    sub(/\]$/, "", raw_locale)
+    set_localized(base, raw_locale, v)
     next
   }
   if (k == "Type") type = v
@@ -256,6 +406,7 @@ FNR == 1 {
   else if (k == "GenericName") t_generic = v
   else if (k == "Comment") t_comment = v
   else if (k == "Exec") t_exec = v
+  else if (k == "TryExec") t_tryexec = v
   else if (k == "Icon") t_icon = v
   else if (k == "Categories") t_categories = v
   else if (k == "Keywords") t_keywords = v
@@ -265,6 +416,8 @@ FNR == 1 {
   else if (k == "NoDisplay") t_nodisplay = v
   else if (k == "OnlyShowIn") t_only = v
   else if (k == "NotShowIn") t_not = v
+  else if (k == "X-AppImage-Version") t_aiversion = v
+  else if (k == "X-AppImage-Integrate") t_aiintegrate = v
 }
 
 END {
