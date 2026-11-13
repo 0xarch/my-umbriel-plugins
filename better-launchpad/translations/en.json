@@ -90,6 +90,18 @@
       "description": "Glyph shown by the launcher button on the bar."
     }
   },
+  "menu": {
+    "open": "Open",
+    "pin": "Pin to Launcher",
+    "unpin": "Unpin from Launcher",
+    "edit": "Edit layout…"
+  },
+  "edit": {
+    "title": "Edit layout",
+    "hint": "Drag a tile onto another to reorder",
+    "done": "Done",
+    "empty": "No applications to arrange yet."
+  },
   "origin": {
     "flatpak": "Flatpak",
     "snap": "Snap",

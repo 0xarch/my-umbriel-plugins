@@ -126,6 +126,30 @@ function json_list(v,   n, parts, i, out, first) {
   return out "]"
 }
 
+# Desktop actions are the extra launcher entries a .desktop file advertises
+# (Actions= plus one [Desktop Action <id>] group each). Only actions with a
+# launchable Exec and a label are emitted, in the order Actions= lists them.
+function json_actions(   n, ids, i, out, first, aid, nm, ex) {
+  out = "["
+  first = 1
+  delete seen_action
+  if (t_actions == "") return out "]"
+  n = split(t_actions, ids, ";")
+  for (i = 1; i <= n; i++) {
+    aid = trim(ids[i])
+    if (aid == "" || (aid in seen_action)) continue
+    seen_action[aid] = 1
+    ex = decode(act_exec[aid])
+    if (ex == "") continue
+    nm = local_value("Action/" aid "/Name", decode(act_name[aid]))
+    if (nm == "") continue
+    if (!first) out = out ","
+    first = 0
+    out = out "{\"id\":\"" jesc(aid) "\",\"name\":\"" jesc(nm) "\",\"exec\":\"" jesc(ex) "\"}"
+  }
+  return out "]"
+}
+
 function json_localized(   out, first, i) {
   out = "["
   first = 1
@@ -356,7 +380,8 @@ function commit(   id, default_name, default_lower, name, name_lower, generic, g
   printf "\"localizedNames\":%s,", json_localized()
   printf "\"searchNames\":%s,", json_search_names(name_lower, default_lower)
   printf "\"keywordsList\":%s,", json_list(keywords)
-  printf "\"categoriesList\":%s", json_list(decode(t_categories))
+  printf "\"categoriesList\":%s,", json_list(decode(t_categories))
+  printf "\"actions\":%s", json_actions()
   printf "}"
 }
 
@@ -372,52 +397,77 @@ FNR == 1 {
   commit()
   current = FILENAME
   group = ""
+  act_current = ""
   local_count = 0
   delete local_values
   delete name_locale_seen
   delete loc_values
+  delete act_name
+  delete act_exec
   type = ""; t_name = ""; t_generic = ""; t_comment = ""; t_exec = ""
   t_icon = ""; t_categories = ""; t_keywords = ""; t_swc = ""
   t_terminal = ""; t_hidden = ""; t_nodisplay = ""; t_only = ""; t_not = ""
-  t_tryexec = ""; t_aiversion = ""; t_aiintegrate = ""
+  t_tryexec = ""; t_aiversion = ""; t_aiintegrate = ""; t_actions = ""
 }
 
 {
   line = $0
   sub(/\r$/, "", line)
-  if (line ~ /^\[/) { group = line; next }
-  if (group != "[Desktop Entry]") next
+  if (line ~ /^\[/) {
+    group = line
+    gsub(/^\[/, "", group)
+    gsub(/\]$/, "", group)
+    act_current = ""
+    if (index(group, "Desktop Action ") == 1) {
+      act_current = trim(substr(group, 16))
+    }
+    next
+  }
   p = index(line, "=")
   if (p <= 1) next
   k = substr(line, 1, p - 1)
   v = substr(line, p + 1)
+  base = k
+  raw_locale = ""
+  localized = 0
   if (k ~ /^[^[]+\[[^]]+\]$/) {
-    base = k
-    raw_locale = ""
+    localized = 1
     sub(/\[.*/, "", base)
     raw_locale = k
     sub(/^[^[]+\[/, "", raw_locale)
     sub(/\]$/, "", raw_locale)
-    set_localized(base, raw_locale, v)
-    next
   }
-  if (k == "Type") type = v
-  else if (k == "Name") t_name = v
-  else if (k == "GenericName") t_generic = v
-  else if (k == "Comment") t_comment = v
-  else if (k == "Exec") t_exec = v
-  else if (k == "TryExec") t_tryexec = v
-  else if (k == "Icon") t_icon = v
-  else if (k == "Categories") t_categories = v
-  else if (k == "Keywords") t_keywords = v
-  else if (k == "StartupWMClass") t_swc = v
-  else if (k == "Terminal") t_terminal = v
-  else if (k == "Hidden") t_hidden = v
-  else if (k == "NoDisplay") t_nodisplay = v
-  else if (k == "OnlyShowIn") t_only = v
-  else if (k == "NotShowIn") t_not = v
-  else if (k == "X-AppImage-Version") t_aiversion = v
-  else if (k == "X-AppImage-Integrate") t_aiintegrate = v
+  if (group == "Desktop Entry") {
+    if (localized) {
+      set_localized(base, raw_locale, v)
+      next
+    }
+    if (k == "Type") type = v
+    else if (k == "Name") t_name = v
+    else if (k == "GenericName") t_generic = v
+    else if (k == "Comment") t_comment = v
+    else if (k == "Exec") t_exec = v
+    else if (k == "TryExec") t_tryexec = v
+    else if (k == "Icon") t_icon = v
+    else if (k == "Categories") t_categories = v
+    else if (k == "Keywords") t_keywords = v
+    else if (k == "StartupWMClass") t_swc = v
+    else if (k == "Terminal") t_terminal = v
+    else if (k == "Hidden") t_hidden = v
+    else if (k == "NoDisplay") t_nodisplay = v
+    else if (k == "OnlyShowIn") t_only = v
+    else if (k == "NotShowIn") t_not = v
+    else if (k == "Actions") t_actions = v
+    else if (k == "X-AppImage-Version") t_aiversion = v
+    else if (k == "X-AppImage-Integrate") t_aiintegrate = v
+  } else if (act_current != "") {
+    if (localized) {
+      if (base == "Name") set_localized("Action/" act_current "/Name", raw_locale, v)
+      next
+    }
+    if (k == "Name") act_name[act_current] = v
+    else if (k == "Exec") act_exec[act_current] = v
+  }
 }
 
 END {

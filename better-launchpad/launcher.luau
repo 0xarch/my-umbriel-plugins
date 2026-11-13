@@ -218,11 +218,26 @@ local usageOwn = { counts = {}, recent = {} }
 local usageOwnPath = nil
 local pinnedRank = {}
 local pinnedSet = {}
+local orderRank = {}
+local order = nil
+local orderPath = nil
+local mode = "normal"
+local lastRightIndex = nil
+local lastRightAt = 0
 local forceList = false
 
--- Forward declarations for functions used by asynchronous callbacks.
+-- A second right-click on the same app within this window enters edit mode.
+local RIGHT_CLICK_WINDOW = 2
+
+-- Forward declarations for functions used by asynchronous callbacks and by
+-- helpers defined before them.
 local refresh
 local resolvePinned
+local focusInput
+local renderNormal
+local openResultMenu
+local enterEditMode
+local exitEditMode
 
 -- ── settings ────────────────────────────────────────────────────────────────
 
@@ -383,6 +398,225 @@ local function recordUsage(provider, id)
   saveUsage()
 end
 
+-- ── layout order ────────────────────────────────────────────────────────────
+
+-- Durable layout: one row per entry, in display order. Today every row is an
+-- application (`{ type = "app", id = <desktop path>, pinned = <bool?> }`); the
+-- `type` field and the preserved extra keys reserve room for folder rows, so a
+-- later version can add `{ type = "folder", id = ..., name = ..., entries = ... }`
+-- without invalidating the store.
+local ORDER_VERSION = 1
+
+local function orderFile()
+  if orderPath == nil then
+    local dataDir = noctalia.pluginDataDir()
+    if type(dataDir) == "string" and dataDir ~= "" then
+      orderPath = dataDir .. "/order.json"
+    end
+  end
+  return orderPath
+end
+
+local function normalizeOrderRow(row)
+  if type(row) ~= "table" or type(row.id) ~= "string" or row.id == "" then
+    return nil
+  end
+  local out = {}
+  for key, value in pairs(row) do
+    if key ~= "type" and key ~= "id" and key ~= "pinned" then
+      out[key] = value
+    end
+  end
+  out.type = type(row.type) == "string" and row.type or "app"
+  out.id = row.id
+  if row.pinned == true then
+    out.pinned = true
+  elseif row.pinned == false then
+    out.pinned = false
+  end
+  return out
+end
+
+local function loadOrder()
+  if order ~= nil then
+    return order
+  end
+  local rows = {}
+  local path = orderFile()
+  local stored = path ~= nil and readJson(path) or nil
+  if type(stored) == "table" and type(stored.entries) == "table" then
+    for _, row in ipairs(stored.entries) do
+      local normalized = normalizeOrderRow(row)
+      if normalized ~= nil then
+        rows[#rows + 1] = normalized
+      end
+    end
+  end
+  order = { version = ORDER_VERSION, entries = rows }
+  return order
+end
+
+local function saveOrder()
+  local path = orderFile()
+  if path == nil then
+    return false
+  end
+  writeJson(path, loadOrder())
+  return true
+end
+
+local function orderRowIndex(id)
+  if type(id) ~= "string" or id == "" then
+    return nil
+  end
+  for index, row in ipairs(loadOrder().entries) do
+    if row.id == id then
+      return index
+    end
+  end
+  return nil
+end
+
+local function reindexOrder()
+  orderRank = {}
+  local rank = 0
+  for _, row in ipairs(loadOrder().entries) do
+    if row.type == "app" and orderRank[row.id] == nil then
+      rank = rank + 1
+      orderRank[row.id] = rank
+    end
+  end
+end
+
+local function findAppByPath(path)
+  for _, entry in ipairs(apps or {}) do
+    if entry.path == path then
+      return entry
+    end
+  end
+  return nil
+end
+
+-- The built-in launcher stores pins as ids; accept the same spellings here.
+local function findAppForPin(pin)
+  local wanted = pin:gsub("%.desktop$", "")
+  local wantedLower = wanted:lower()
+  for _, entry in ipairs(apps or {}) do
+    if entry.id == wanted or entry.id:lower() == wantedLower
+      or entry.path == pin
+      or (entry.startupWmClass ~= "" and (entry.startupWmClass == wanted or entry.startupWmClass:lower() == wantedLower)) then
+      return entry
+    end
+  end
+  return nil
+end
+
+-- Reconcile the stored layout with the scan: seed the shell's pinned list the
+-- first time an app is seen, then append every app that is not stored yet.
+-- Missing entries are kept so an uninstalled app returns to its old slot.
+local function syncOrder()
+  local store = loadOrder()
+  local byId = {}
+  for _, row in ipairs(store.entries) do
+    if row.type == "app" and byId[row.id] == nil then
+      byId[row.id] = row
+    end
+  end
+
+  local changed = false
+  local newPins = {}
+  for _, pin in ipairs(config ~= nil and config.pinned or {}) do
+    if type(pin) == "string" and pin ~= "" then
+      local match = findAppForPin(pin)
+      if match ~= nil then
+        local row = byId[match.path]
+        if row == nil then
+          row = { type = "app", id = match.path, pinned = true }
+          newPins[#newPins + 1] = row
+          byId[match.path] = row
+          changed = true
+        elseif row.pinned == nil then
+          row.pinned = true
+          changed = true
+        end
+      end
+    end
+  end
+  for index = #newPins, 1, -1 do
+    table.insert(store.entries, 1, newPins[index])
+  end
+
+  local seen = {}
+  for _, row in ipairs(store.entries) do
+    if row.type == "app" then
+      seen[row.id] = true
+    end
+  end
+  for _, entry in ipairs(apps or {}) do
+    if not seen[entry.path] then
+      store.entries[#store.entries + 1] = { type = "app", id = entry.path }
+      seen[entry.path] = true
+      changed = true
+    end
+  end
+
+  if changed then
+    saveOrder()
+  end
+  reindexOrder()
+end
+
+local function setPinned(path, pinned)
+  local index = orderRowIndex(path)
+  if index == nil then
+    return false
+  end
+  local store = loadOrder()
+  local row = store.entries[index]
+  if row.pinned == pinned then
+    return false
+  end
+  row.pinned = pinned
+  if pinned then
+    table.remove(store.entries, index)
+    local position = 1
+    for cursor, item in ipairs(store.entries) do
+      if item.type == "app" and item.pinned == true then
+        position = cursor + 1
+      end
+    end
+    table.insert(store.entries, position, row)
+  end
+  saveOrder()
+  resolvePinned()
+  refresh()
+  render()
+  return true
+end
+
+-- Move one stored row onto another position (edit-mode drag and drop).
+local function moveOrderRow(fromId, toPosition)
+  local fromPosition = orderRowIndex(fromId)
+  local store = loadOrder()
+  local target = tonumber(toPosition)
+  if fromPosition == nil or target == nil or target < 1 or target > #store.entries then
+    return false
+  end
+  if fromPosition == target then
+    return false
+  end
+  if target > #store.entries + 1 then
+    target = #store.entries + 1
+  end
+  local row = table.remove(store.entries, fromPosition)
+  -- The moved row takes the target slot, like the built-in reorder.
+  table.insert(store.entries, target, row)
+  saveOrder()
+  reindexOrder()
+  render()
+  return true
+end
+
 -- ── desktop entries ─────────────────────────────────────────────────────────
 
 -- ── application discovery ───────────────────────────────────────────────────
@@ -396,8 +630,7 @@ local function finishAppScan(list)
   apps = list
   appsAt = os.time()
   appCategories = nil
-  pinnedRank = {}
-  pinnedSet = {}
+  syncOrder()
   resolvePinned()
   if isOpen then
     appRefreshPending = true
@@ -477,30 +710,18 @@ end
 resolvePinned = function()
   pinnedRank = {}
   pinnedSet = {}
-  if config == nil or type(config.pinned) ~= "table" then
-    return
-  end
+  local store = loadOrder()
   local rank = 0
-  for _, pin in ipairs(config.pinned) do
-    if type(pin) == "string" and pin ~= "" then
-      local wanted = pin:gsub("%.desktop$", "")
-      local wantedLower = wanted:lower()
-      local match = nil
-      for _, entry in ipairs(apps or {}) do
-        if entry.id == wanted or entry.id:lower() == wantedLower
-          or entry.path == pin
-          or (entry.startupWmClass ~= "" and (entry.startupWmClass == wanted or entry.startupWmClass:lower() == wantedLower)) then
-          match = entry
-          break
-        end
-      end
-      if match ~= nil and not pinnedSet[match.path] then
-        rank = rank + 1
-        pinnedRank[match.path] = rank
-        pinnedSet[match.path] = true
+  for _, row in ipairs(store.entries) do
+    if row.type == "app" then
+      rank = rank + 1
+      if row.pinned == true and pinnedSet[row.id] ~= true then
+        pinnedSet[row.id] = true
+        pinnedRank[row.id] = rank
       end
     end
   end
+  reindexOrder()
 end
 
 -- ── emoji ───────────────────────────────────────────────────────────────────
@@ -1027,20 +1248,12 @@ local function queryApplications(pattern, typed)
   end
 
   if pattern == "" then
+    -- The empty query follows the stored layout, so edits and pins stick.
     table.sort(list, function(a, b)
-      local ar = a.rank
-      local br = b.rank
-      if ar ~= nil and br == nil then
-        return true
-      end
-      if ar == nil and br ~= nil then
-        return false
-      end
-      if ar ~= nil and br ~= nil and ar ~= br then
+      local ar = orderRank[a.id] or math.huge
+      local br = orderRank[b.id] or math.huge
+      if ar ~= br then
         return ar < br
-      end
-      if a.score ~= b.score then
-        return a.score > b.score
       end
       return a.titleLower < b.titleLower
     end)
@@ -1674,15 +1887,56 @@ local function isFocused(index)
   return keyboardFocus and selected == index
 end
 
-local function tile(result, index)
-  local fill = isFocused(index) and "primary/0.16" or "surface/0"
+local TILE_HEIGHT = 104
+local ROW_HEIGHT = 54
+
+-- Right-click handling. Only a button receives right-clicks in a panel, so each
+-- card carries a transparent button stretched over the whole tile with the
+-- compositing `translateY` offset; the card itself stays purely visual.
+-- The first right-click opens the native menu, a second one on the same app
+-- inside RIGHT_CLICK_WINDOW enters edit mode.
+local function requestEditMode(index)
+  if mode == "edit" then
+    return false
+  end
+  local now = os.time()
+  if lastRightIndex == index and now - lastRightAt <= RIGHT_CLICK_WINDOW then
+    lastRightIndex = nil
+    enterEditMode()
+    return true
+  end
+  lastRightIndex = index
+  lastRightAt = now
+  return false
+end
+
+local function resultOverlay(result, index, height)
+  return ui.button({
+    key = "ov-" .. index,
+    height = height,
+    translateY = -height,
+    opacity = 0,
+    variant = "ghost",
+    tooltip = originLabel(result.origin),
+    onClick = function() activate(index) end,
+    onRightClick = function()
+      if requestEditMode(index) then
+        return
+      end
+      openResultMenu(index)
+    end,
+    onHover = "onResultHover",
+  })
+end
+
+local function tileCard(result, focused, key, pinned)
   local iconWidth, iconHeight = 40, 40
   if result.imagePath ~= nil then
     iconWidth, iconHeight = 74, 40
   end
 
   local pinBadge = nil
-  if result.pinned then
+  if pinned then
     pinBadge = ui.row({ width = 12, height = 12, align = "center", justify = "center" }, {
       ui.glyph({ name = "pin-filled", size = 11, color = "primary" }),
     })
@@ -1701,7 +1955,7 @@ local function tile(result, index)
       fontSize = 11,
       maxLines = 2,
       textAlign = "center",
-      color = isFocused(index) and "on_surface" or "on_surface_variant",
+      color = focused and "on_surface" or "on_surface_variant",
       height = 24,
     }),
     ui.row({ height = 12, justify = "end", align = "center" }, {
@@ -1709,23 +1963,31 @@ local function tile(result, index)
     }),
   }
   return ui.column({
-    key = "res-" .. index,
-    flexGrow = 1,
-    height = 104,
+    key = key,
+    height = TILE_HEIGHT,
     gap = 2,
     padding = 4,
     align = "stretch",
     justify = "center",
     radius = 10,
-    fill = fill,
-    tooltip = originLabel(result.origin),
-    onHover = "onResultHover",
-    onClick = function() activate(index) end,
+    fill = focused and "primary/0.16" or "surface/0",
   }, children)
 end
 
-local function listRow(result, index)
-  local fill = isFocused(index) and "primary/0.16" or "surface/0"
+local function tile(result, index)
+  return ui.column({
+    key = "res-" .. index,
+    flexGrow = 1,
+    height = TILE_HEIGHT,
+    gap = 0,
+    align = "stretch",
+  }, {
+    tileCard(result, isFocused(index), "card-" .. index, result.pinned),
+    resultOverlay(result, index, TILE_HEIGHT),
+  })
+end
+
+local function listCard(result, focused, key)
   local text = ui.column({ gap = 1, flexGrow = 1, align = "start" }, {
     ui.label({
       text = result.title,
@@ -1752,18 +2014,22 @@ local function listRow(result, index)
     children[#children + 1] = ui.glyph({ name = "copy", size = 14, color = "on_surface_variant" })
   end
   return ui.row({
-    key = "res-" .. index,
-    height = 54,
+    key = key,
+    height = ROW_HEIGHT,
     gap = 12,
     paddingH = 10,
     paddingV = 6,
     align = "center",
     radius = 10,
-    fill = fill,
-    tooltip = originLabel(result.origin),
-    onHover = "onResultHover",
-    onClick = function() activate(index) end,
+    fill = focused and "primary/0.16" or "surface/0",
   }, children)
+end
+
+local function listRow(result, index)
+  return ui.column({ key = "res-" .. index, height = ROW_HEIGHT, gap = 0, align = "stretch" }, {
+    listCard(result, isFocused(index), "card-" .. index),
+    resultOverlay(result, index, ROW_HEIGHT),
+  })
 end
 
 local function resultNodes()
@@ -1832,6 +2098,159 @@ local function emptyState()
   })
 end
 
+-- ── edit mode ───────────────────────────────────────────────────────────────
+
+-- Edit mode is a separate surface: no search field, no provider routing, just
+-- the stored layout in five-column form. Rows are drag sources dropped onto
+-- neighbouring tiles; folders and other row types will slot in here later.
+local DRAG_TYPE = "better-launchpad-app"
+
+local function editHeader()
+  return ui.row({
+    height = 46,
+    gap = 8,
+    paddingH = 12,
+    align = "center",
+    fill = "surface_container",
+    radius = 12,
+    border = "outline_variant",
+    borderWidth = 1,
+  }, {
+    ui.glyph({ name = "layout-grid", size = 18, color = "primary" }),
+    ui.column({ gap = 0, flexGrow = 1, align = "start" }, {
+      ui.label({
+        text = T("edit.title", "Edit layout"),
+        fontSize = 14,
+        fontWeight = "semibold",
+        color = "on_surface",
+        maxLines = 1,
+      }),
+      ui.label({
+        text = T("edit.hint", "Drag a tile onto another to reorder"),
+        fontSize = 11,
+        color = "on_surface_variant",
+        maxLines = 1,
+      }),
+    }),
+    ui.button({
+      text = T("edit.done", "Done"),
+      variant = "secondary",
+      onClick = function() exitEditMode() end,
+    }),
+  })
+end
+
+local function editTile(row, position)
+  local entry = findAppByPath(row.id)
+  if entry == nil then
+    return nil
+  end
+  local result = {
+    provider = "Applications",
+    title = entry.name,
+    iconName = entry.icon ~= "" and entry.icon or "application-x-executable",
+    origin = entry.origin,
+    pinned = row.pinned == true,
+  }
+  local card = tileCard(result, false, "ecard-" .. position, row.pinned == true)
+  return ui.dropZone({
+    key = "ezone-" .. position,
+    height = TILE_HEIGHT,
+    flexGrow = 1,
+    align = "stretch",
+    fill = "surface/0",
+    radius = 10,
+    accepts = { DRAG_TYPE },
+    value = tostring(position),
+    onDrop = "onReorderDrop",
+  }, {
+    ui.dragSource({
+      dragType = DRAG_TYPE,
+      payload = row.id,
+      previewAncestor = 0,
+      height = TILE_HEIGHT,
+      align = "stretch",
+      fill = "surface/0",
+      radius = 10,
+    }, { card }),
+  })
+end
+
+local function editNodes()
+  local nodes = {}
+  local row = {}
+  for position, entry in ipairs(loadOrder().entries) do
+    if entry.type == "app" then
+      local node = editTile(entry, position)
+      if node ~= nil then
+        row[#row + 1] = node
+        if #row == 5 then
+          nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
+          row = {}
+        end
+      end
+    end
+  end
+  if #row > 0 then
+    while #row < 5 do
+      row[#row + 1] = ui.spacer({ flexGrow = 1 })
+    end
+    nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
+  end
+  return nodes
+end
+
+local function renderEdit()
+  local nodes = editNodes()
+  local body = nil
+  if #nodes == 0 then
+    body = ui.column({ flexGrow = 1, align = "center", justify = "center", gap = 8 }, {
+      ui.glyph({ name = "apps", size = 28, color = "on_surface_variant" }),
+      ui.label({
+        text = T("edit.empty", "No applications to arrange yet."),
+        fontSize = 12,
+        color = "on_surface_variant",
+      }),
+    })
+  else
+    body = ui.scroll({ key = "edit-" .. scrollRev, flexGrow = 1, gap = 6 }, nodes)
+  end
+  panel.render(ui.column({ flexGrow = 1, gap = 10 }, { editHeader(), body }))
+end
+
+enterEditMode = function()
+  if mode == "edit" or not isOpen then
+    return
+  end
+  mode = "edit"
+  hoverIndex = nil
+  keyboardFocus = true
+  lastRightIndex = nil
+  scrollRev = scrollRev + 1
+  render()
+end
+
+exitEditMode = function()
+  if mode ~= "edit" then
+    return
+  end
+  mode = "normal"
+  hoverIndex = nil
+  keyboardFocus = true
+  selected = 1
+  scrollRev = scrollRev + 1
+  focusInput()
+  refresh()
+  render()
+end
+
+function onReorderDrop(payload, value)
+  if mode ~= "edit" then
+    return
+  end
+  moveOrderRow(payload, value)
+end
+
 function render()
   if not isOpen then
     return
@@ -1840,6 +2259,17 @@ function render()
   iconBudget = ICON_LOOKUPS_PER_RENDER
   iconPending = false
 
+  if mode == "edit" then
+    renderEdit()
+  else
+    renderNormal()
+  end
+  if iconPending then
+    panel.setNeedsFrameTick(true)
+  end
+end
+
+renderNormal = function()
   local header = ui.row({
     height = 46,
     gap = 8,
@@ -1902,14 +2332,11 @@ function render()
   root[#root + 1] = body
 
   panel.render(ui.column({ flexGrow = 1, gap = 10 }, root))
-  if iconPending then
-    panel.setNeedsFrameTick(true)
-  end
 end
 
 -- ── activation ──────────────────────────────────────────────────────────────
 
-local function focusInput()
+focusInput = function()
   inputRev = inputRev + 1
 end
 
@@ -2024,6 +2451,100 @@ function activate(index)
   end
 end
 
+-- ── context menu ────────────────────────────────────────────────────────────
+
+local MENU_MAX_VISIBLE = 14
+
+-- Desktop actions carry a launchable Exec and a label; anything else the
+-- scanner dropped already, but re-check so a bad row never opens a dead entry.
+local function launchableActions(entry)
+  local out = {}
+  if type(entry) ~= "table" or type(entry.actions) ~= "table" then
+    return out
+  end
+  for position, action in ipairs(entry.actions) do
+    if type(action) == "table"
+      and type(action.name) == "string" and action.name ~= ""
+      and type(action.exec) == "string" and action.exec ~= "" then
+      out[#out + 1] = { position = position, name = action.name, exec = action.exec }
+    end
+  end
+  return out
+end
+
+-- Mirrors the built-in menu: Open, the desktop actions, then pin/unpin. The
+-- layout editor is reachable from here as well as from a double right-click.
+openResultMenu = function(index)
+  local result = results[index]
+  if result == nil or panel.openContextMenu == nil then
+    return false
+  end
+  local items = { { kind = "header", label = result.title } }
+  items[#items + 1] = { id = "open", label = T("menu.open", "Open") }
+  for _, action in ipairs(launchableActions(result.entry)) do
+    items[#items + 1] = { id = "act:" .. action.position, label = action.name }
+  end
+  if result.provider == "Applications" then
+    items[#items + 1] = { kind = "separator" }
+    if result.pinned then
+      items[#items + 1] = { id = "unpin", label = T("menu.unpin", "Unpin from Launcher") }
+    else
+      items[#items + 1] = { id = "pin", label = T("menu.pin", "Pin to Launcher") }
+    end
+    items[#items + 1] = { kind = "separator" }
+    items[#items + 1] = { id = "edit", label = T("menu.edit", "Edit layout…") }
+  end
+  local opened = panel.openContextMenu({
+    items = items,
+    onActivate = "onResultMenu",
+    context = result.id,
+    maxVisible = MENU_MAX_VISIBLE,
+  })
+  return opened == true
+end
+
+local function resultIndexById(id)
+  for index, item in ipairs(results) do
+    if item.id == id then
+      return index
+    end
+  end
+  return nil
+end
+
+function onResultMenu(actionId, context)
+  if not isOpen or type(actionId) ~= "string" or type(context) ~= "string" then
+    return
+  end
+  local index = resultIndexById(context)
+  if index == nil then
+    return
+  end
+  local result = results[index]
+  if actionId == "open" then
+    activate(index)
+  elseif actionId == "edit" then
+    enterEditMode()
+  elseif actionId == "pin" or actionId == "unpin" then
+    if result.entry ~= nil then
+      setPinned(result.entry.path, actionId == "pin")
+    end
+  elseif actionId:sub(1, 4) == "act:" then
+    local position = tonumber(actionId:sub(5))
+    if position == nil or result.entry == nil then
+      return
+    end
+    for _, action in ipairs(launchableActions(result.entry)) do
+      if action.position == position then
+        recordUsage("Applications", result.entry.path)
+        launchExec({ exec = action.exec, terminal = result.entry.terminal })
+        finish()
+        return
+      end
+    end
+  end
+end
+
 function onSubmit(value)
   if type(value) == "string" and value ~= query then
     query = value
@@ -2055,7 +2576,8 @@ function onResultHover(state, key)
     return
   end
   if state == "true" then
-    local index = tonumber(string.match(key or "", "^res%-(%d+)$"))
+    -- Tiles and rows report the transparent overlay button's key.
+    local index = tonumber(string.match(key or "", "^ov%-(%d+)$"))
     if index == nil then
       return
     end
@@ -2077,6 +2599,17 @@ end
 
 function onKey(chord, pressed)
   if not isOpen or pressed ~= true then
+    return
+  end
+  if chord == "Ctrl+e" then
+    if mode == "edit" then
+      exitEditMode()
+    else
+      enterEditMode()
+    end
+    return
+  end
+  if mode == "edit" then
     return
   end
   local columns = isGrid() and 5 or 1
@@ -2113,8 +2646,11 @@ function onOpen(context)
   isOpen = true
   config = loadConfig()
   loadUsage()
+  loadOrder()
   getApplications(false)
   resolvePinned()
+  mode = "normal"
+  lastRightIndex = nil
   query = type(context) == "string" and context or ""
   providerId = "" -- force a provider reset for the new session
   catFilter = "all"
@@ -2135,6 +2671,8 @@ function onClose()
   isOpen = false
   hoverIndex = nil
   keyboardFocus = true
+  mode = "normal"
+  lastRightIndex = nil
   appRefreshPending = false
   calcSeq = calcSeq + 1
   panel.setNeedsFrameTick(false)

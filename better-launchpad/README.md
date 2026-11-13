@@ -30,6 +30,9 @@ noctalia msg panel-toggle io.soloev/better-launchpad:launchpad
 | Hover | Move the focus to the app under the pointer; leaving the results clears it |
 | Up / Down | Move by one row; in a grid, also by one tile with Left / Right |
 | Enter | Launch the selected app, copy an emoji or result, apply a wallpaper, run a session action, or focus a window |
+| Right-click an app | Open its menu: Open, the desktop actions from the `.desktop` file, Pin/Unpin, and Edit layout |
+| Double right-click an app | Enter the layout editor |
+| Ctrl+E | Toggle the layout editor |
 | Esc | Close the panel |
 | Category chip | Filter the current provider (Applications and Emoji) |
 
@@ -51,6 +54,23 @@ results also appear for digit queries in the normal application search.
 Applications launch through `gio launch` with the entry's `Exec` as a fallback.
 Windows use Umbriel's `window-focus` action, and session actions call
 `noctalia msg session <action>`.
+
+## Layout editor
+
+The empty query lists applications in a stored order instead of by usage. The
+first scan appends every discovered app to the layout, so a new application
+shows up at the end on its first launch. The editor is separate from the normal
+mode: no search field, just the stored layout with the same tiles.
+
+- Drag a tile onto another one to reorder; the dragged app takes the target
+  slot. The full order is written to `order.json` under the plugin data
+  directory after every change.
+- The shell's `shell.launcher.pinned` list seeds the front of the layout the
+  first time an app is seen. Pin and Unpin from the context menu move the app
+  into or out of the pinned block, and the result is stored in `order.json`
+  rather than written back to the shell config.
+- Each row in `order.json` carries a `type` (`"app"` today) and any extra keys
+  are preserved, so folder rows can be added without invalidating a store.
 
 ## Settings
 
@@ -100,7 +120,14 @@ directory, so uninstalling the plugin does not disturb the shell's history.
 - Flatpak and Snap entries show a package badge in the tile's bottom-right
   corner, and AppImage entries show the AppImage badge there. The badge's origin
   label appears as the tile tooltip.
-- Usage boosting only applies when `shell.launcher.sort_by_usage` is enabled.
+- Usage boosting only applies when `shell.launcher.sort_by_usage` is enabled;
+  it only affects a typed query, because the empty query follows the stored
+  layout.
+- A panel control cannot host children, so each tile is a card plus a
+  transparent button stretched over it with the compositing `translateY` prop.
+  That button is what receives clicks, hover, and right-clicks.
+- The native context menu can only be opened from a live pointer callback, so
+  there is no keyboard-only equivalent of the right-click menu.
 
 ## Development
 

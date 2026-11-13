@@ -6,7 +6,7 @@
 
 id = "io.soloev/better-launchpad"
 name = "Better Launchpad"
-version = "0.2.0"
+version = "0.3.0"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"
@@ -39,5 +39,5 @@ position = "center"
 dismiss_on_outside_click = true
 capture_keys = [
   "Up", "Down", "Left", "Right", "Prior", "Next",
-  "Ctrl+j", "Ctrl+k", "Ctrl+n", "Ctrl+p", "Ctrl+b", "Ctrl+f",
+  "Ctrl+j", "Ctrl+k", "Ctrl+n", "Ctrl+p", "Ctrl+b", "Ctrl+f", "Ctrl+e",
 ]

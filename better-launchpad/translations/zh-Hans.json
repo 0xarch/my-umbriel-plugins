@@ -90,6 +90,18 @@
       "description": "栏上启动按钮显示的图标。"
     }
   },
+  "menu": {
+    "open": "打开",
+    "pin": "固定到启动器",
+    "unpin": "从启动器取消固定",
+    "edit": "编辑布局…"
+  },
+  "edit": {
+    "title": "编辑布局",
+    "hint": "把磁贴拖到另一个磁贴上即可调整顺序",
+    "done": "完成",
+    "empty": "还没有可以排列的应用。"
+  },
   "origin": {
     "flatpak": "Flatpak",
     "snap": "Snap",
