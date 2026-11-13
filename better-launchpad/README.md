@@ -76,8 +76,9 @@ directory, so uninstalling the plugin does not disturb the shell's history.
 
 - `gio` (recommended) to launch desktop entries. Without it the plugin runs the
   entry's `Exec` line directly.
-- `python3` to parse desktop entries for application discovery (the helper runs
-  off the callback thread so a large catalog stays within the plugin CPU budget).
+- `bash` and `awk` to parse desktop entries for application discovery (the helper
+  runs off the callback thread so a large catalog stays within the plugin CPU
+  budget).
 - `qalc` for the calculator provider.
 - `umbriel` for the window provider.
 - Noctalia 5 with plugin API 46 or newer.
@@ -89,8 +90,8 @@ directory, so uninstalling the plugin does not disturb the shell's history.
 - Application discovery reads the XDG application directories, including user
   entries and the Flatpak and Snap export directories. `NoDisplay`,
   `OnlyShowIn`, and `NotShowIn` follow the desktop-entry spec. Entries are parsed
-  by `scan-apps.py`; the panel decodes its JSON asynchronously and renders on the
-  next frame.
+  by `scan-apps.sh` (the same awk approach as `better-taskbar`); the panel decodes
+  its JSON asynchronously and renders on the next frame.
 - Usage boosting only applies when `shell.launcher.sort_by_usage` is enabled.
 
 ## Development
@@ -100,7 +101,7 @@ Wayland session:
 
 ```sh
 lua harness/launcher/launcher.lua
-python3 -m unittest harness/launcher/test_scan_apps.py
+python3 -m unittest harness/launcher/test_scan_apps.py   # dev-only check
 ```
 
 See `harness/launcher/README.md` for the scenarios and the API mock.

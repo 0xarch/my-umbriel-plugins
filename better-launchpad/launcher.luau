@@ -419,21 +419,8 @@ local function startAppScan()
   end
   appScan = true
 
-  local interpreter = nil
-  for _, name in ipairs({ "python3", "python" }) do
-    if noctalia.commandExists(name) then
-      interpreter = name
-      break
-    end
-  end
-  if interpreter == nil then
-    appScan = nil
-    finishAppScan({})
-    return
-  end
-
   local dir = noctalia.pluginDir() or "."
-  local started = noctalia.runAsync({ interpreter, dir .. "/scan-apps.py" }, function(result)
+  local started = noctalia.runAsync({ "bash", dir .. "/scan-apps.sh" }, function(result)
     appScan = nil
     local list = {}
     if type(result) == "table" and result.exitCode == 0 and type(result.stdout) == "string" then
