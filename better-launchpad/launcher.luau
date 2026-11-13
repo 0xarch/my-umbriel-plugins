@@ -225,9 +225,10 @@ local resolvePinned
 -- ── settings ────────────────────────────────────────────────────────────────
 
 local function loadConfig()
-  local providers = setting("shell.launcher.providers", {})
-  if type(providers) ~= "table" then
-    providers = {}
+  local launcherSettings = setting("shell.launcher", {})
+  local providers = {}
+  if type(launcherSettings) == "table" and type(launcherSettings.providers) == "table" then
+    providers = launcherSettings.providers
   end
 
   local function providerConf(id)
@@ -1586,7 +1587,7 @@ end
 
 -- Icon-theme lookups are the expensive part of a grid render. Resolve a few
 -- per frame and show glyph fallbacks for the rest until the next frame.
-local ICON_LOOKUPS_PER_RENDER = 4
+local ICON_LOOKUPS_PER_RENDER = 1
 
 local function resolveIcon(name, size)
   if type(name) ~= "string" or name == "" then
