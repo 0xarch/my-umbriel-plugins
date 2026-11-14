@@ -229,7 +229,7 @@ local forceList = false
 local resultsShown = 0
 -- Frame-loop flags: a tile list is truncated, a render is owed after a refresh,
 -- or resolved icons are waiting to be drawn.
-local flags = { more = false, render = false, icons = false, apps = false }
+local flags = { more = false, render = false, icons = false, apps = false, folderShown = 0 }
 local folderOpen = nil
 local folderResults = {}
 
@@ -726,6 +726,24 @@ end
 -- Missing entries are kept so an uninstalled app returns to its old slot.
 local function syncOrder()
   local store = loadOrder()
+  local folded = {}
+  for _, row in ipairs(store.entries) do
+    if row.type == "folder" then
+      for _, path in ipairs(row.entries or {}) do
+        folded[path] = true
+      end
+    end
+  end
+  local changed = false
+  -- Older scans may have recreated a folded pin at the top level. Keep its
+  -- folder placement authoritative when repairing that duplicate.
+  for index = #store.entries, 1, -1 do
+    local row = store.entries[index]
+    if row.type == "app" and folded[row.id] then
+      table.remove(store.entries, index)
+      changed = true
+    end
+  end
   local byId = {}
   for _, row in ipairs(store.entries) do
     if row.type == "app" and byId[row.id] == nil then
@@ -733,12 +751,11 @@ local function syncOrder()
     end
   end
 
-  local changed = false
   local newPins = {}
   for _, pin in ipairs(config ~= nil and config.pinned or {}) do
     if type(pin) == "string" and pin ~= "" then
       local match = findAppForPin(pin)
-      if match ~= nil then
+      if match ~= nil and not folded[match.path] then
         local row = byId[match.path]
         if row == nil then
           row = { type = "app", id = match.path, pinned = true }
@@ -2135,7 +2152,8 @@ local function maybeCalculate()
   local expression = nil
   if providerId == "Calculator" then
     expression = trim(providerQuery)
-  elseif providerId == "Applications" and query:find("%d") ~= nil then
+  elseif providerId == "Applications" and config.providers.calculator.global
+      and query:find("%d") ~= nil then
     expression = trim(query)
   end
 
@@ -2206,7 +2224,11 @@ local function buildResults()
     -- typed query searches every application and stays capped so a very broad
     -- match does not build a huge tree.
     if providerQuery == "" then
-      list = storedLayoutResults()
+      if catFilter == "recent" then
+        list = queryApplications("", false)
+      else
+        list = storedLayoutResults()
+      end
       list = applyCategoryFilter(list)
     else
       list = queryApplications(providerQuery, true)
@@ -2680,20 +2702,22 @@ local TILE = {
   icon = 44,
   name = 30,
   nameMin = 24,
+  folderName = 18,
   miniMax = 19,
   gap = 4,
 }
 TILE.size = GRID.main.tile
 
 -- A tile's bands follow its size: the main grid is wide enough for the 44 px
--- icon and the 30 px name band, while the narrower folder subview shrinks the
--- icon first and keeps at least one readable name line. Without this the fixed
--- bands overflowed the smaller folder tiles.
+-- icon and the two-line name band. Narrow folder tiles use one full name line
+-- with a matching band height, leaving room for the normal icon size.
 TILE.metrics = function(size)
   local inner = size - TILE.pad * 2 - TILE.gap
-  local icon = math.max(0, math.min(TILE.icon, inner - TILE.nameMin))
-  local name = math.max(0, math.min(TILE.name, inner - icon))
-  return icon, name
+  local compact = size < TILE.size
+  local nameMin = compact and TILE.folderName or TILE.nameMin
+  local icon = math.max(0, math.min(TILE.icon, inner - nameMin))
+  local name = math.max(0, math.min(compact and TILE.folderName or TILE.name, inner - icon))
+  return icon, name, compact and 1 or 2
 end
 
 -- Folder previews pack four mini icons in a 2x2 grid with a 2 px gap.
@@ -2766,7 +2790,7 @@ end
 -- centred as a group. The name band has an explicit width so a long name wraps
 -- inside the tile instead of overflowing it.
 local function cardColumn(key, size, focused, icon, title)
-  local iconSize, nameSize = TILE.metrics(size)
+  local iconSize, nameSize, nameLines = TILE.metrics(size)
   return ui.column({
     key = key,
     height = size,
@@ -2788,7 +2812,8 @@ local function cardColumn(key, size, focused, icon, title)
       ui.label({
         text = title,
         fontSize = 11,
-        maxLines = 2,
+        maxLines = nameLines,
+        maxWidth = size - TILE.pad * 2,
         textAlign = "center",
         color = focused and "on_surface" or "on_surface_variant",
       }),
@@ -2907,8 +2932,9 @@ end
 -- subview (narrower than the panel) gets its own tile size.
 resultNodesFrom = function(list, grid)
   local nodes = {}
-  local count = math.min(resultsShown, #list)
-  flags.more = count < #list
+  local shown = list == folderResults and flags.folderShown or resultsShown
+  local count = math.min(shown, #list)
+  flags.more = flags.more or count < #list
   if isGrid() then
     local row = {}
     for index = 1, count do
@@ -3387,6 +3413,7 @@ openFolder = function(row)
   end
   folderOpen = row
   folderResults = buildFolderResults(row)
+  flags.folderShown = RESULTS_PER_FRAME
   -- Reopening mid-close continues from the current progress instead of
   -- snapping the subview back to invisible.
   anim.folderTarget = 1
@@ -3955,7 +3982,7 @@ function onResultMenu(actionId, context)
   end
   local result = list[index]
   if actionId == "open" then
-    activate(index)
+    activate(index, list)
   elseif actionId == "edit" then
     enterEditMode()
   elseif actionId == "pin" or actionId == "unpin" then
@@ -4107,6 +4134,9 @@ function onFrameTick(deltaMs)
         editState.shown = editState.shown + RESULTS_PER_FRAME
       else
         resultsShown = math.min(resultsShown + RESULTS_PER_FRAME, #results)
+        if folderOpen ~= nil then
+          flags.folderShown = math.min(flags.folderShown + RESULTS_PER_FRAME, #folderResults)
+        end
       end
       needsRender = true
     end

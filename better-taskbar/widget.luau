@@ -418,6 +418,7 @@ local function makeTile(tile, showTitles, titleWidth)
   end
 
   local iconStack = ui.column({
+    width = ts,
     height = ts,
     gap = stackGap,
     align = "center",
@@ -430,12 +431,19 @@ local function makeTile(tile, showTitles, titleWidth)
     if #tile.windows > 0 then
       title = windowTitle(tile.windows[1])
     end
-    table.insert(rowChildren, ui.label({
-      text = title,
-      fontSize = 11,
-      maxWidth = titleWidth,
-      maxLines = 1,
-      color = tile.active and "on_surface" or "on_surface_variant",
+    table.insert(rowChildren, ui.row({
+      width = titleWidth,
+      height = ts,
+      align = "center",
+      justify = "start",
+    }, {
+      ui.label({
+        text = title,
+        fontSize = 11,
+        maxWidth = titleWidth,
+        maxLines = 1,
+        color = tile.active and "on_surface" or "on_surface_variant",
+      }),
     }))
   end
 
@@ -464,14 +472,16 @@ local function makeTile(tile, showTitles, titleWidth)
     })
   end
 
-  -- Square tile with circular hover; always set fill (even transparent)
+  -- Icon-only tiles stay square; titles get their own width and spacing.
+  -- Always set fill (even transparent)
   -- so the reconciler clears it on leave.
   local isHovered = hovered == key
 
   return ui.row({
     key = key,
-    width = ts,
+    width = showTitles and ts + 6 + titleWidth or ts,
     height = ts,
+    gap = showTitles and 6 or 0,
     radius = ts / 2,
     align = "center",
     justify = "center",
@@ -561,7 +571,7 @@ local function buildRenderModel()
   end
 
   local pins = nil
-  if type(snapshot.pins) == "table" and #snapshot.pins > 0 then
+  if type(snapshot.pins) == "table" then
     pins = snapshot.pins
   else
     pins = C.configuredPins
@@ -886,7 +896,7 @@ local function render()
   if showTitles then
     local spacing = C.itemSpacing
     local budget = math.floor((C.taskbarMaxWidth - spacing * (#tiles - 1)) / #tiles)
-    titleWidth = math.min(C.windowTitleMaxWidth, math.max(0, budget - iconSize() - 10))
+    titleWidth = math.min(C.windowTitleMaxWidth, math.max(0, budget - tileSize() - 6))
     if titleWidth < 16 then
       showTitles = false
     end

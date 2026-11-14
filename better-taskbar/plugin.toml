@@ -7,7 +7,7 @@
 
 id = "io.soloev/better-taskbar"
 name = "Better Taskbar"
-version = "0.5.3"
+version = "0.5.4"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"
