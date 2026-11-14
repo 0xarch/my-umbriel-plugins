@@ -250,6 +250,9 @@ local anim = {
   -- The value the current transition started from, so the fade can be eased
   -- over the distance travelled in either direction.
   folderFrom = 0,
+  -- Latches the open fade's last step: the search field drops the keyboard
+  -- only once the veil is opaque, so the repaint it causes stays hidden.
+  folderSettled = true,
   folderAt = nil,
   -- A frame can arrive late (the first layout after a click measured ~97 ms),
   -- and one such gap would skip most of the fade. Each step advances at most
@@ -320,10 +323,23 @@ anim.step = function()
       changed = true
     end
   end
+  if anim.folder == 1 and anim.folderTarget == 1 and folderOpen ~= nil and not anim.folderSettled then
+    -- The veil is fully opaque now, so the search field can drop the keyboard
+    -- (a fresh input key is the only way to blur) without the repaint showing.
+    anim.folderSettled = true
+    inputRev = inputRev + 1
+    changed = true
+  end
   if anim.folder == 0 and anim.folderTarget == 0 and folderOpen ~= nil then
-    -- The close animation reached zero: drop the subview from the tree.
+    -- The close animation reached zero: drop the subview from the tree. Only
+    -- now does the grid get its keyboard focus back, so the highlight it adds
+    -- is not painted under a still-fading veil (that reads as a colour flash).
     folderOpen = nil
     folderResults = {}
+    keyboardFocus = true
+    -- A fresh input key is how the search field re-takes the keyboard; doing it
+    -- here (after the veil is gone) keeps that repaint out of the fade.
+    inputRev = inputRev + 1
     changed = true
   end
   return changed
@@ -343,6 +359,7 @@ anim.resetFolder = function()
   anim.folder = 0
   anim.folderTarget = 0
   anim.folderFrom = 0
+  anim.folderSettled = true
   anim.folderAt = nil
 end
 
@@ -3215,11 +3232,13 @@ openFolder = function(row)
   anim.folderTarget = 1
   anim.folderFrom = anim.folder
   anim.folderAt = nil
-  hoverIndex = nil
-  hoverFolder = false
-  keyboardFocus = false
-  selected = 1
-  inputRev = inputRev + 1
+  -- The grid stays exactly as it was: same hover highlight, same keyboard
+  -- selection and scroll offset. The veil starts fully transparent, so clearing
+  -- the pointer focus or resetting `selected` (which also re-targets the scroll
+  -- reveal) repainted part of the grid in the first fade frames and showed up
+  -- as a colour flash at the click. The field keeps the keyboard until the
+  -- veil is opaque (see anim.step), so typing during the fade is harmless.
+  anim.folderSettled = false
   render()
   panel.setNeedsFrameTick(true)
 end
@@ -3233,10 +3252,9 @@ closeFolder = function()
   anim.folderTarget = 0
   anim.folderFrom = anim.folder
   anim.folderAt = nil
-  hoverIndex = nil
-  hoverFolder = false
-  keyboardFocus = true
-  inputRev = inputRev + 1
+  -- Nothing under the veil changes while it fades: the grid's highlight and
+  -- scroll stay put, and the search field only takes the keyboard back once the
+  -- subview is gone (see anim.step).
   render()
   panel.setNeedsFrameTick(true)
 end
@@ -3427,9 +3445,10 @@ local function folderMask()
     }),
     body,
   })
-  -- Animate only group opacity here. Transforming a clipped flex card makes
-  -- its visual bounds disagree with the layout bounds, leaving asymmetric gaps
-  -- at the panel edges while it opens or closes.
+  -- Never transform this node: a transformed clipped flex card makes its visual
+  -- bounds disagree with the layout bounds, leaving asymmetric gaps at the
+  -- panel edges while it opens or closes. Opening also avoids group opacity,
+  -- which would fade the card along with the veil (see below).
   local mask = ui.column({
     key = "folder-mask",
     width = PANEL.width,
@@ -3446,7 +3465,18 @@ local function folderMask()
     clip = true,
     onClick = function() closeFolder() end,
   }, { subview })
-  if progress < 1 then
+  if anim.folderTarget == 1 then
+    -- Opening: only the veil's own alpha moves. Group opacity would fade the
+    -- card as well, blending its fill over the still-light grid; mid-fade the
+    -- card looks darker and muddier than its settled colour, which reads as a
+    -- flash rather than a fade. The card stays fully opaque here, so the only
+    -- thing that changes frame to frame is the scrim behind it.
+    if progress < 1 then
+      mask.props.fill = string.format("scrim/%.3f", 0.55 * progress)
+    end
+  elseif progress < 1 then
+    -- Closing: the card and veil fade together, so the card never lingers
+    -- opaque and then disappears when the progress reaches zero.
     mask.props.opacity = progress
   end
   return mask
@@ -3620,6 +3650,12 @@ function onRenameSubmit(value)
 end
 
 function onQueryChanged(value)
+  if folderOpen ~= nil then
+    -- The field keeps the keyboard through the open fade (the blur would
+    -- repaint under the veil), so ignore stray typing until it is re-created
+    -- with the unchanged query once the veil is opaque.
+    return
+  end
   if value == query then
     return
   end
