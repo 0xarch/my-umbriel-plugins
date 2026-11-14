@@ -200,6 +200,12 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   (the card is drawn at the style's default local scale while plugin radii are
   scaled by the panel's content scale), so the scrim's corners land on the
   card's.
+- The grid always renders inside a keyed `content` wrapper under the keyed
+  `panel-root`; a folder only adds the scrim as a sibling. Building the root
+  differently while a folder is open made the host's reconciler see a (type,
+  key) mismatch at the root and rebuild the whole grid, icons included, on every
+  open and close. That re-upload is visible under the scrim as a flash, so only
+  `folder-mask` opacity changes during the fade.
 - The folder subview reuses those tiles, so its overlay keys repeat the grid's.
   Pointer focus is scoped to the list that owns the hover: a hover inside the
   subview never highlights the card at the same index under the scrim.

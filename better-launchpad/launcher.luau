@@ -3465,32 +3465,43 @@ function render()
   else
     root = renderNormal()
   end
-  -- Opening: fade the content in and let it rise a few pixels. The mask stays
-  -- outside this node so the folder subview keeps covering the whole panel.
+  -- The host gives the plugin tree the panel size minus its 14 px inset on
+  -- every side. Keep the normal content in that exact area; the mask is
+  -- deliberately larger and paints into the host's inset around it.
+  --
+  -- The wrapper and the content column are always present, with fixed keys, so
+  -- opening a folder only adds the mask to the sibling list. Swapping the root
+  -- instead made the reconciler match the old grid against new node types and
+  -- rebuild the whole grid, icons included, on every open and close: that
+  -- re-upload reshuffled the pixels under the scrim and read as a flash rather
+  -- than a fade.
+  local parts = {
+    ui.column({
+      key = "content",
+      width = PANEL.contentWidth,
+      height = PANEL.contentHeight,
+      gap = 10,
+      clip = true,
+    }, { root }),
+  }
+  if folderOpen ~= nil and mode == "normal" then
+    parts[#parts + 1] = folderMask()
+  end
+  root = ui.column({
+    key = "panel-root",
+    width = PANEL.contentWidth,
+    height = PANEL.contentHeight,
+    gap = 0,
+    align = "start",
+  }, parts)
+  -- Opening: fade the content in and let it rise a few pixels. The mask is a
+  -- sibling and the panel always opens with no folder, so the outer root can
+  -- carry this; only `opacity` and `translateY` change here, never the child
+  -- list, so every step reconciles the grid instead of rebuilding it.
   local fade = anim.ease(anim.open)
   if fade < 1 then
     root.props.opacity = fade
     root.props.translateY = (1 - fade) * 10
-  end
-  if folderOpen ~= nil and mode == "normal" then
-    -- The host gives the plugin tree the panel size minus its 14 px inset on
-    -- every side. Keep the normal content in that exact area; the mask is
-    -- deliberately larger and paints into the host's inset around it.
-    root = ui.column({
-      key = "panel-root",
-      width = PANEL.contentWidth,
-      height = PANEL.contentHeight,
-      gap = 0,
-      align = "start",
-    }, {
-      ui.column({
-        width = PANEL.contentWidth,
-        height = PANEL.contentHeight,
-        gap = 10,
-        clip = true,
-      }, { root }),
-      folderMask(),
-    })
   end
   panel.render(root)
   if #iconQueue > 0 or flags.more or flags.icons then
