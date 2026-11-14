@@ -3357,10 +3357,23 @@ local PANEL = {
   padding = 14,
   contentWidth = 560 - 14 * 2,
   contentHeight = 500 - 14 * 2,
-  -- Style::radiusXl: the card's corner radius in logical pixels. Matching it
-  -- keeps the scrim from painting its square corners over the card's rounding.
+  -- Style::radiusXl: the panel card's base corner radius. The host scales it
+  -- by shell.corner_radius_scale, while plugin node radii are also multiplied
+  -- by accessibility.ui_scale, so convert back into plugin units.
   radius = 12,
 }
+
+PANEL.cardRadius = function()
+  local corner = setting("shell.corner_radius_scale", 1)
+  if type(corner) ~= "number" or corner < 0 then
+    corner = 1
+  end
+  local uiScale = setting("accessibility.ui_scale", 1)
+  if type(uiScale) ~= "number" or uiScale <= 0 then
+    uiScale = 1
+  end
+  return PANEL.radius * corner / uiScale
+end
 
 local function folderMask()
   local progress = anim.folderOpacity()
@@ -3426,7 +3439,7 @@ local function folderMask()
     -- the card's top-left corner, so it covers the card exactly.
     translateX = -PANEL.padding,
     translateY = -(PANEL.contentHeight + PANEL.padding),
-    radius = PANEL.radius,
+    radius = PANEL.cardRadius(),
     fill = "scrim/0.55",
     align = "center",
     justify = "center",

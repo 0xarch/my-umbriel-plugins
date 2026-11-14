@@ -194,9 +194,12 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   inset on every side, so the tree only owns 532x472 of the 560x500 card. The
   scrim is sized to the card and shifted back out by one content height plus the
   inset; sizing it to the tree instead leaves the card's padding visible on the
-  left, top and right while spilling past the card at the bottom. Its radius
-  matches `Style::radiusXl` so it never paints square corners over the card's
-  rounding.
+  left, top and right while spilling past the card at the bottom. Its radius is
+  `Style::radiusXl` times `shell.corner_radius_scale` divided by
+  `accessibility.ui_scale`, which is the same rounding the host gives the card
+  (the card is drawn at the style's default local scale while plugin radii are
+  scaled by the panel's content scale), so the scrim's corners land on the
+  card's.
 - The folder subview reuses those tiles, so its overlay keys repeat the grid's.
   Pointer focus is scoped to the list that owns the hover: a hover inside the
   subview never highlights the card at the same index under the scrim.
