@@ -1606,18 +1606,51 @@ end
 
 local function launchApplication(entry)
   recordUsage("Applications", entry.path)
-  local gio = noctalia.commandExists("gio")
-  if gio then
-    local ok = noctalia.runAsync({ "gio", "launch", entry.path }, function(result)
-      if result ~= nil and result.exitCode ~= 0 then
-        launchExec(entry)
-      end
-    end)
+
+  -- Keep GUI apps out of the host's captured-output command timeout path.
+  local desktopIdLookup = type(entry.path) == "string"
+    and entry.path:match("/applications/[^/]+%.desktop$") ~= nil
+  if desktopIdLookup and type(entry.id) == "string" and entry.id ~= "" and noctalia.commandExists("gtk-launch") then
+    local ok = noctalia.runAsync({ "gtk-launch", entry.id })
+    if entry.id == "com.qq.QQ" then
+      noctalia.log("[Better Launchpad] com.qq.QQ via gtk-launch accepted=" .. tostring(ok))
+    end
     if ok then
       return true
     end
   end
-  return launchExec(entry)
+
+  local gio = noctalia.commandExists("gio")
+  if gio then
+    local ok = noctalia.runAsync({ "gio", "launch", entry.path }, function(result)
+      if entry.id == "com.qq.QQ" then
+        local exitCode, timedOut = "missing", "missing"
+        if type(result) == "table" then
+          exitCode = tostring(result.exitCode)
+          timedOut = tostring(result.timedOut)
+        end
+        noctalia.log("[Better Launchpad] com.qq.QQ gio result exit=" .. tostring(exitCode)
+          .. " timeout=" .. tostring(timedOut))
+      end
+      if result ~= nil and result.exitCode ~= 0 then
+        local fallback = launchExec(entry)
+        if entry.id == "com.qq.QQ" then
+          noctalia.log("[Better Launchpad] com.qq.QQ Exec fallback accepted=" .. tostring(fallback))
+        end
+      end
+    end)
+    if entry.id == "com.qq.QQ" then
+      noctalia.log("[Better Launchpad] com.qq.QQ via gio accepted=" .. tostring(ok))
+    end
+    if ok then
+      return true
+    end
+  end
+  local fallback = launchExec(entry)
+  if entry.id == "com.qq.QQ" then
+    noctalia.log("[Better Launchpad] com.qq.QQ direct Exec accepted=" .. tostring(fallback))
+  end
+  return fallback
 end
 
 -- ── result building ─────────────────────────────────────────────────────────
