@@ -157,14 +157,25 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   `LANG`: `Name[zh_CN]` (and the `GenericName`, `Comment`, and `Keywords`
   variants) wins over the untranslated value, and every translation stays
   searchable as an alias.
-- Tiles are built from fixed-height bands (badges, icon, clipped two-line name,
-  origin badge), so the icon and the title's top edge stay put regardless of
-  how the name wraps.
+- Grid tiles are square: the tile width is derived from the results width
+  after reserving the host scroll view's scrollbar gutter (6 + 8 px), so the
+  columns never move when a page starts to overflow, and every cell is as tall
+  as it is wide. The icon sits in a fixed slot above a clipped two-line name.
+  Pinned and origin badges paint over the card through a full-height sibling
+  translated up by one tile (the same compositing trick the click target uses),
+  so they do not take layout space from the icon and name. The folder subview is
+  narrower than the panel, so it derives its own square tile size, and its icon
+  and name bands shrink to fit instead of overflowing the smaller tile.
 - Large catalogs render in chunks of ten results per frame, and icon-theme
-  lookups run in a separate frame pass with a small time budget. The layout
-  editor uses the same chunking (and never queues icon lookups), so opening it
-  with a large catalog cannot overrun the 25 ms callback budget and make the
-  host disable the panel. Resolved icon
+  lookups run in a separate frame pass with a small time budget. Before a
+  render paints a page whose icons are still unknown, it warms that page and the
+  folder previews already on it (same 10 ms budget) so a cold cache shows its
+  final icons on the first frame instead of placeholders that swap in one by one;
+  an icon that still cannot be resolved
+  keeps a fixed-size slot and shows a neutral placeholder, never a differently
+  sized glyph. The layout editor uses the same chunking (and never queues icon
+  lookups), so opening it with a large catalog cannot overrun the 25 ms callback
+  budget and make the host disable the panel. Resolved icon
   paths are cached in `icon-cache.json` under the plugin data directory, so
   reopening the panel draws every icon immediately; entries whose file no
   longer exists (theme switch, uninstall) are dropped on load.
@@ -176,7 +187,8 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   layout.
 - A panel control cannot host children, so each tile is a card plus a
   transparent button stretched over it with the compositing `translateY` prop.
-  That button is what receives clicks, hover, and right-clicks.
+  That button is what receives clicks, hover, and right-clicks, and it clears
+  both the card and the badge overlay stacked between them in layout order.
 - The plugin API has no transition or animation props, so the panel animates
   itself from `onFrameTick`: it fades and rises in over 180 ms on open (the host's
   own reveal runs before the script's first tree exists, so it is not visible
@@ -205,12 +217,12 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   inset on every side, so the tree only owns 532x472 of the 560x500 card. The
   scrim is sized to the card and shifted back out by one content height plus the
   inset; sizing it to the tree instead leaves the card's padding visible on the
-  left, top and right while spilling past the card at the bottom. Its radius is
-  `Style::radiusXl` times `shell.corner_radius_scale` divided by
-  `accessibility.ui_scale`, which is the same rounding the host gives the card
-  (the card is drawn at the style's default local scale while plugin radii are
-  scaled by the panel's content scale), so the scrim's corners land on the
-  card's.
+  left, top and right while spilling past the card at the bottom. It stops at
+  the card's inner edge (one `shell.panel.border_width` inside, when panel
+  borders are on) so the host's border ring stays visible all the way round
+  instead of being painted over, and its radius is `Style::radiusXl` times
+  `shell.corner_radius_scale` minus that inset, which matches the host's rounded
+  corner.
 - The grid always renders inside a keyed `content` wrapper under the keyed
   `panel-root`; a folder only adds the scrim as a sibling. Building the root
   differently while a folder is open made the host's reconciler see a (type,

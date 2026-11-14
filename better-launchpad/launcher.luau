@@ -389,6 +389,7 @@ local RIGHT_CLICK_WINDOW = 2
 -- Forward declarations for functions used by asynchronous callbacks and by
 -- helpers defined before them.
 local refresh
+local warmVisibleIcons
 local resolvePinned
 local focusInput
 local renderNormal
@@ -2371,7 +2372,7 @@ local ICON_LOOKUP_BUDGET_MS = 10
 local ICONS_PER_TICK = 12
 local iconQueue = {}
 local iconQueued = {}
-local iconStore = { loaded = false, dirty = false }
+local iconStore = { loaded = false, dirty = false, warm = {} }
 
 local function iconCacheFile()
   local dataDir = noctalia.pluginDataDir()
@@ -2432,25 +2433,35 @@ local function queueIcon(name, size)
   iconQueue[#iconQueue + 1] = { key = key, name = name, size = size }
 end
 
+-- Returns the resolved path, plus whether the lookup is still queued. A caller
+-- can then tell "not looked up yet" (draw a neutral placeholder) from "looked
+-- up and missing" (draw the glyph fallback), so a cold cache does not paint a
+-- wrong-sized glyph that swaps to an image a frame later.
 local function resolveIcon(name, size)
   if type(name) ~= "string" or name == "" then
-    return nil
+    return nil, false
   end
   local key = name .. "@" .. tostring(size)
   local cached = iconCache[key]
   if cached == nil then
     queueIcon(name, size)
-    return nil
+    return nil, true
   end
   if cached == false then
-    return nil
+    return nil, false
   end
-  return cached
+  return cached, false
 end
 
+-- The icon always occupies a fixed slot. A glyph has no size of its own (the
+-- host ignores width/height on glyphs), so an unresolved icon used to be
+-- smaller than the image that replaced it: the icon visibly grew and, in list
+-- rows and the folder preview, the text next to it shifted. With a slot, a
+-- cold cache only changes what is painted inside the same box.
 local function iconNode(result, width, height)
+  local child = nil
   if result.emoji ~= nil then
-    return ui.label({
+    child = ui.label({
       text = result.emoji,
       fontSize = math.floor(height * 0.72),
       width = width,
@@ -2458,9 +2469,8 @@ local function iconNode(result, width, height)
       textAlign = "center",
       baseline = "pictographic",
     })
-  end
-  if result.imagePath ~= nil then
-    return ui.image({
+  elseif result.imagePath ~= nil then
+    child = ui.image({
       path = result.imagePath,
       width = width,
       height = height,
@@ -2469,12 +2479,88 @@ local function iconNode(result, width, height)
       border = "outline_variant",
       borderWidth = 1,
     })
+  else
+    local path, pending = resolveIcon(result.iconName, math.min(width, height))
+    if path ~= nil then
+      child = ui.image({ path = path, width = width, height = height, fit = "contain" })
+    elseif pending then
+      -- A quiet placeholder holds the slot for the frame or two before the
+      -- queued lookup lands; no wrong glyph flashes first.
+      child = ui.box({ width = width, height = height, radius = 6, fill = "surface_container_high" })
+    else
+      child = ui.glyph({
+        name = result.glyph or "app-window",
+        size = math.min(width, height),
+        color = "on_surface_variant",
+      })
+    end
   end
-  local path = resolveIcon(result.iconName, height)
-  if path ~= nil then
-    return ui.image({ path = path, width = width, height = height, fit = "contain" })
+  return ui.row({ width = width, height = height, align = "center", justify = "center" }, { child })
+end
+
+-- Warm the icons that the next render will actually show. This keeps the first
+-- visible page from painting placeholders and then replacing them one by one;
+-- the fixed slot still protects later pages if a theme lookup exceeds the
+-- budget. The state guard avoids repeating work for hover-only renders.
+warmVisibleIcons = function(list, count, size, members)
+  -- Keyed by scope and size because the main grid, the folder previews and the
+  -- folder subview warm different lists in the same render; one shared slot
+  -- would redo all of them every frame.
+  local stateKey = (members and "m" or "") .. tostring(size)
+  local state = iconStore.warm[stateKey]
+  if state == nil then
+    state = { list = nil, count = 0 }
+    iconStore.warm[stateKey] = state
   end
-  return ui.glyph({ name = result.glyph or "app-window", size = math.floor(height * 0.7), color = "on_surface_variant" })
+  if state.list == list and state.count >= count then
+    return
+  end
+  state.list = list
+  state.count = count
+
+  -- Collect the names first so the budget check stays in a single loop: with
+  -- `members` the names come from each folder's preview slots, otherwise from
+  -- the results themselves.
+  local names = {}
+  for index = 1, math.min(count, #list) do
+    local result = list[index]
+    if result ~= nil then
+      if members then
+        local folder = result.folder
+        if type(folder) == "table" and type(folder.entries) == "table" then
+          for _, path in ipairs(folder.entries) do
+            local entry = findAppByPath(path)
+            if entry ~= nil then
+              names[#names + 1] = entry.icon ~= "" and entry.icon or "application-x-executable"
+            end
+          end
+        end
+      elseif result.imagePath == nil and result.emoji == nil then
+        names[#names + 1] = result.iconName
+      end
+    end
+  end
+
+  local started = os.clock()
+  for _, name in ipairs(names) do
+    if type(name) == "string" and name ~= "" then
+      local key = name .. "@" .. tostring(size)
+      if iconCache[key] == nil then
+        local path = noctalia.appIconPath(name, size)
+        if type(path) == "string" and path ~= "" then
+          iconCache[key] = path
+          iconStore.dirty = true
+        else
+          iconCache[key] = false
+        end
+        if (os.clock() - started) * 1000 >= ICON_LOOKUP_BUDGET_MS then
+          -- Retry the visible range on the next render; cached entries are cheap.
+          state.count = 0
+          break
+        end
+      end
+    end
+  end
 end
 
 -- The shell marks Flatpak/Snap and AppImage entries with a small glyph; other
@@ -2524,7 +2610,75 @@ local function isFocused(index, inFolder)
   return keyboardFocus and inFolder ~= true and selected == index
 end
 
-local TILE_HEIGHT = 108
+-- Kept in one table because the main chunk is at Luau's 200-local cap.
+local PANEL = {
+  width = 560,
+  height = 500,
+  padding = 14,
+  contentWidth = 560 - 14 * 2,
+  contentHeight = 500 - 14 * 2,
+  -- Style::radiusXl: the panel card's base corner radius. The host renders the
+  -- card at radiusXl * corner_radius_scale * ui_scale, and plugin node radii are
+  -- also multiplied by ui_scale, so the matching plugin-unit radius is the
+  -- unscaled product.
+  radius = 12,
+}
+
+PANEL.cardRadius = function()
+  local corner = setting("shell.corner_radius_scale", 1)
+  if type(corner) ~= "number" or corner < 0 then
+    corner = 1
+  end
+  return PANEL.radius * corner
+end
+
+-- The host strokes the card's border inside its rounded rect. The folder scrim
+-- is sized to the card, so painting it corner-to-corner covered that border and
+-- the card looked borderless while a folder was open. Keep the scrim on the
+-- card's inner edge instead, with the matching inner radius. Returns the inset
+-- and radius in plugin units: the host strokes in logical pixels, while plugin
+-- node values are multiplied by accessibility.ui_scale.
+PANEL.borderInset = function()
+  if setting("shell.panel.borders", true) ~= true then
+    return 0, PANEL.cardRadius()
+  end
+  local width = setting("shell.panel.border_width", 1)
+  if type(width) ~= "number" or width < 0 then
+    width = 0
+  end
+  local uiScale = setting("accessibility.ui_scale", 1)
+  if type(uiScale) ~= "number" or uiScale <= 0 then
+    uiScale = 1
+  end
+  local inset = width / uiScale
+  return inset, math.max(0, PANEL.cardRadius() - inset)
+end
+
+-- Grid geometry. `metrics` returns the square tile size and the fixed row
+-- width for a surface: the results scroll is a host ScrollView that reserves a
+-- 6 + 8 px scrollbar gutter once its content outgrows the viewport, which used
+-- to narrow every column on the first overflow. Reserving that gutter up front
+-- keeps the columns still, and deriving the tile from the same width makes
+-- every cell square. The folder subview is narrower than the panel, so it gets
+-- its own metrics instead of inheriting the main grid's. Kept in one table
+-- (like PANEL) because the main chunk is at Luau's 200-local cap.
+local GRID = {
+  columns = 5,
+  gap = 8,
+  gutter = 14,
+  folderWidth = 420,
+  folderHeight = 360,
+}
+GRID.metrics = function(availableWidth)
+  local usableWidth = math.max(0, availableWidth - GRID.gutter)
+  local tile = math.floor((usableWidth - (GRID.columns - 1) * GRID.gap) / GRID.columns)
+  return {
+    tile = tile,
+    width = GRID.columns * tile + (GRID.columns - 1) * GRID.gap,
+  }
+end
+GRID.main = GRID.metrics(PANEL.contentWidth)
+GRID.folder = GRID.metrics(GRID.folderWidth)
 local ROW_HEIGHT = 54
 
 -- Right-click handling. Only a button receives right-clicks in a panel, so each
@@ -2547,11 +2701,14 @@ local function requestEditMode(index)
   return false
 end
 
-local function resultOverlay(result, index, height, list)
+-- `offset` is how far the overlay sits below the card in layout: one tile, plus
+-- another tile when a badge overlay is stacked between them. The translate is
+-- paint-only, so the overlay lands back on the card either way.
+local function resultOverlay(result, index, height, list, offset)
   return ui.button({
     key = "ov-" .. index,
     height = height,
-    translateY = -height,
+    translateY = -(offset or height),
     opacity = 0,
     variant = "ghost",
     tooltip = originLabel(result.origin),
@@ -2566,33 +2723,63 @@ local function resultOverlay(result, index, height, list)
   })
 end
 
--- Fixed-height bands keep the icon in the same place whether the name wraps
--- to one line or two: the label is measured by its text, so it lives inside a
--- 30px row that clips instead of stretching the column.
-local TILE_BADGE_BAND = 12
-local TILE_ICON_BAND = 42
-local TILE_NAME_BAND = 34
-local TILE_ORIGIN_BAND = 12
+-- A tile is square. The old card stacked fixed bands (badge, icon, name,
+-- origin) inside a fixed-height column, so every cell read as a tall rectangle
+-- and the icon sat above centre. Corner badges now paint over the card instead
+-- of taking bands, leaving the icon and the name to share the whole square.
+-- Kept in one table to stay under Luau's 200-local cap.
+local TILE = {
+  pad = 4,
+  icon = 44,
+  name = 30,
+  nameMin = 24,
+  miniMax = 19,
+  gap = 4,
+}
+TILE.size = GRID.main.tile
 
--- Folder tiles show up to four member icons in a 2x2 grid; missing members
--- get empty placeholders so the tile always has the same shape.
-local function folderMiniIcon(path)
-  local entry = path ~= nil and findAppByPath(path) or nil
-  if entry == nil then
-    return ui.box({ width = 19, height = 19, radius = 4, fill = "surface_container_high" })
-  end
-  local name = entry.icon ~= "" and entry.icon or "application-x-executable"
-  local iconPath = resolveIcon(name, 19)
-  if iconPath ~= nil then
-    return ui.image({ path = iconPath, width = 19, height = 19, fit = "contain" })
-  end
-  return ui.glyph({ name = "app-window", size = 13, color = "on_surface_variant" })
+-- A tile's bands follow its size: the main grid is wide enough for the 44 px
+-- icon and the 30 px name band, while the narrower folder subview shrinks the
+-- icon first and keeps at least one readable name line. Without this the fixed
+-- bands overflowed the smaller folder tiles.
+TILE.metrics = function(size)
+  local inner = size - TILE.pad * 2 - TILE.gap
+  local icon = math.max(0, math.min(TILE.icon, inner - TILE.nameMin))
+  local name = math.max(0, math.min(TILE.name, inner - icon))
+  return icon, name
 end
 
-local function folderIconGrid(row)
+-- Folder previews pack four mini icons in a 2x2 grid with a 2 px gap.
+TILE.mini = function(size)
+  local icon = TILE.metrics(size)
+  return math.max(0, math.min(TILE.miniMax, math.floor((icon - 2) / 2)))
+end
+
+-- Folder tiles show up to four member icons in a 2x2 grid; missing or pending
+-- members get fixed placeholders so the preview never changes its footprint.
+local function folderMiniIcon(path, size)
+  local entry = path ~= nil and findAppByPath(path) or nil
+  local child = nil
+  if entry == nil then
+    child = ui.box({ width = size, height = size, radius = 4, fill = "surface_container_high" })
+  else
+    local name = entry.icon ~= "" and entry.icon or "application-x-executable"
+    local iconPath, pending = resolveIcon(name, size)
+    if iconPath ~= nil then
+      child = ui.image({ path = iconPath, width = size, height = size, fit = "contain" })
+    elseif pending then
+      child = ui.box({ width = size, height = size, radius = 4, fill = "surface_container_high" })
+    else
+      child = ui.glyph({ name = "app-window", size = size, color = "on_surface_variant" })
+    end
+  end
+  return ui.row({ width = size, height = size, align = "center", justify = "center" }, { child })
+end
+
+local function folderIconGrid(row, size)
   local members = {}
   for position = 1, FOLDER_MEMBERS_SHOWN do
-    members[#members + 1] = folderMiniIcon((row.entries or {})[position])
+    members[#members + 1] = folderMiniIcon((row.entries or {})[position], size)
   end
   return ui.column({ gap = 2, align = "center" }, {
     ui.row({ gap = 2 }, { members[1], members[2] }),
@@ -2600,132 +2787,84 @@ local function folderIconGrid(row)
   })
 end
 
--- `renaming` swaps the four-icon preview for a pencil: an expanded folder in
--- the editor is renamed through that icon instead of being opened. The member
--- count is only drawn in the editor, where it helps while arranging; the
--- normal grid leaves the origin band empty. `grow` lets the editor's drag
--- source stretch the card across its cell exactly like an app tile.
-local function folderCard(result, focused, key, renaming, grow, showCount)
-  local row = result.folder
-  local count = #(row.entries or {})
-  local icon = folderIconGrid(row)
-  if renaming then
-    icon = ui.glyph({ name = "pencil", size = 28, color = "primary" })
+-- Corner badges paint over the card through the same paint-only compositing
+-- resultOverlay uses: a full-height sibling translated up by exactly one tile.
+-- They therefore never reserve layout space. The pin sits at the top-right,
+-- `bottom` (the origin glyph, or the member count in the editor) at the
+-- bottom-right.
+local function cardBadges(key, size, pinned, bottom)
+  if not pinned and bottom == nil then
+    return nil
   end
-  local footer = ui.spacer({ flexGrow = 1 })
-  if showCount then
-    footer = ui.label({ text = tostring(count), fontSize = 10, color = "on_surface_variant" })
-  end
-  local children = {
-    ui.row({ height = TILE_BADGE_BAND, justify = "end", align = "center" }, {
-      ui.spacer({ flexGrow = 1 }),
-    }),
-    ui.row({ height = TILE_ICON_BAND, justify = "center", align = "center" }, { icon }),
-    ui.column({ height = TILE_NAME_BAND, align = "center", justify = "start", clip = true }, {
-      ui.label({
-        text = result.title,
-        fontSize = 11,
-        maxLines = 2,
-        textAlign = "center",
-        color = focused and "on_surface" or "on_surface_variant",
-      }),
-    }),
-    ui.row({ height = TILE_ORIGIN_BAND, justify = "end", align = "center" }, { footer }),
-  }
-  return ui.column({
-    key = key,
-    height = TILE_HEIGHT,
-    gap = 0,
-    padding = 4,
-    align = "stretch",
-    justify = "start",
-    radius = 10,
-    fill = focused and "primary/0.16" or "surface/0",
-    flexGrow = grow == true and 1 or nil,
-  }, children)
-end
-
-local function folderTile(result, index, list)
-  return ui.column({
-    key = "res-" .. index,
-    flexGrow = 1,
-    height = TILE_HEIGHT,
-    gap = 0,
-    align = "stretch",
-  }, {
-    folderCard(result, isFocused(index, list == folderResults), "card-" .. index),
-    resultOverlay(result, index, TILE_HEIGHT, list),
-  })
-end
-
-local function folderListRow(result, index, list)
-  return ui.column({ key = "res-" .. index, height = ROW_HEIGHT, gap = 0, align = "stretch" }, {
-    listCard(result, isFocused(index, list == folderResults), "card-" .. index),
-    resultOverlay(result, index, ROW_HEIGHT, list),
-  })
-end
-
-local function tileCard(result, focused, key, pinned, grow)
-  local iconWidth, iconHeight = 40, 40
-  if result.imagePath ~= nil then
-    iconWidth, iconHeight = 74, 40
-  end
-
-  local pinBadge = nil
+  local top = nil
   if pinned then
-    pinBadge = ui.row({ width = 12, height = 12, align = "center", justify = "center" }, {
+    top = ui.row({ width = 12, height = 12, align = "center", justify = "center" }, {
       ui.glyph({ name = "pin-filled", size = 11, color = "primary" }),
     })
   end
-  local badge = originBadge(result.origin, 12)
+  return ui.column({
+    key = "badges-" .. key,
+    height = size,
+    translateY = -size,
+    padding = 3,
+    justify = "space_between",
+    align = "end",
+  }, {
+    top or ui.spacer({ flexGrow = 1 }),
+    bottom or ui.spacer({ flexGrow = 1 }),
+  })
+end
 
-  local children = {
-    ui.row({ height = TILE_BADGE_BAND, justify = "end", align = "center" }, {
-      pinBadge or ui.spacer({ flexGrow = 1 }),
-    }),
-    ui.row({ height = TILE_ICON_BAND, justify = "center", align = "center" }, {
-      iconNode(result, iconWidth, iconHeight),
-    }),
-    ui.column({ height = TILE_NAME_BAND, align = "center", justify = "start", clip = true }, {
+-- The card is as tall as it is wide: the icon slot and the name band are
+-- centred as a group. The name band has an explicit width so a long name wraps
+-- inside the tile instead of overflowing it.
+local function cardColumn(key, size, focused, icon, title)
+  local iconSize, nameSize = TILE.metrics(size)
+  return ui.column({
+    key = key,
+    height = size,
+    gap = TILE.gap,
+    padding = TILE.pad,
+    align = "center",
+    justify = "center",
+    radius = 10,
+    fill = focused and "primary/0.16" or "surface/0",
+  }, {
+    ui.row({ width = iconSize, height = iconSize, align = "center", justify = "center" }, { icon }),
+    ui.column({
+      width = size - TILE.pad * 2,
+      height = nameSize,
+      align = "center",
+      justify = "start",
+      clip = true,
+    }, {
       ui.label({
-        text = result.title,
+        text = title,
         fontSize = 11,
         maxLines = 2,
         textAlign = "center",
         color = focused and "on_surface" or "on_surface_variant",
       }),
     }),
-    ui.row({ height = TILE_ORIGIN_BAND, justify = "end", align = "center" }, {
-      badge or ui.spacer({ flexGrow = 1 }),
-    }),
-  }
-  return ui.column({
-    key = key,
-    height = TILE_HEIGHT,
-    gap = 0,
-    padding = 4,
-    align = "stretch",
-    justify = "start",
-    radius = 10,
-    fill = focused and "primary/0.16" or "surface/0",
-    flexGrow = grow == true and 1 or nil,
-  }, children)
+  })
 end
 
-local function tile(result, index, list)
-  if result.provider == "Folder" then
-    return folderTile(result, index, list)
+-- `renaming` swaps the four-icon preview for a pencil: an expanded folder in
+-- the editor is renamed through that icon instead of being opened.
+local function folderCard(result, focused, key, renaming, size)
+  local iconSize = TILE.metrics(size)
+  local icon = folderIconGrid(result.folder, TILE.mini(size))
+  if renaming then
+    icon = ui.glyph({ name = "pencil", size = math.min(28, iconSize), color = "primary" })
   end
-  return ui.column({
-    key = "res-" .. index,
-    flexGrow = 1,
-    height = TILE_HEIGHT,
-    gap = 0,
-    align = "stretch",
-  }, {
-    tileCard(result, isFocused(index, list == folderResults), "card-" .. index, result.pinned),
-    resultOverlay(result, index, TILE_HEIGHT, list),
-  })
+  return cardColumn(key, size, focused, icon, result.title)
+end
+
+local function tileCard(result, focused, key, size)
+  local iconSize = TILE.metrics(size)
+  -- Screenshots and wallpapers keep their wide thumbnail; app icons are square.
+  local iconWidth = result.imagePath ~= nil and math.min(74, size - TILE.pad * 2) or iconSize
+  return cardColumn(key, size, focused, iconNode(result, iconWidth, iconSize), result.title)
 end
 
 local function listCard(result, focused, key)
@@ -2766,6 +2905,40 @@ local function listCard(result, focused, key)
   }, children)
 end
 
+-- The cell wrapper paints the card and its badge overlay in one fixed-size
+-- box. It is a column so the translated overlay always lands on the card,
+-- whatever flex direction the parent has (the editor's drag source is a row).
+local function tileCell(key, size, card, badges, overlay)
+  local children = { card }
+  if badges ~= nil then
+    children[#children + 1] = badges
+  end
+  children[#children + 1] = overlay
+  return ui.column({ key = key, width = size, height = size, gap = 0, align = "stretch" }, children)
+end
+
+local function tile(result, index, list, grid)
+  local size = grid.tile
+  local key = "card-" .. index
+  local card = nil
+  local badges = nil
+  if result.provider == "Folder" then
+    card = folderCard(result, isFocused(index, list == folderResults), key, false, size)
+  else
+    card = tileCard(result, isFocused(index, list == folderResults), key, size)
+    badges = cardBadges(key, size, result.pinned, originBadge(result.origin, 12))
+  end
+  local offset = badges ~= nil and size * 2 or size
+  return tileCell("res-" .. index, size, card, badges, resultOverlay(result, index, size, list, offset))
+end
+
+local function folderListRow(result, index, list)
+  return ui.column({ key = "res-" .. index, height = ROW_HEIGHT, gap = 0, align = "stretch" }, {
+    listCard(result, isFocused(index, list == folderResults), "card-" .. index),
+    resultOverlay(result, index, ROW_HEIGHT, list),
+  })
+end
+
 local function listRow(result, index, list)
   if result.provider == "Folder" then
     return folderListRow(result, index, list)
@@ -2777,29 +2950,32 @@ local function listRow(result, index, list)
 end
 
 local function resultNodes()
-  return resultNodesFrom(results, nil)
+  return resultNodesFrom(results, GRID.main)
 end
 
 -- `list` is the tile model the overlay closures resolve against: the main
--- results, or the open folder's members.
-resultNodesFrom = function(list, keyPrefix)
+-- results, or the open folder's members. `grid` carries the square-tile
+-- metrics for the surface that owns the scroll: a fixed row width keeps the
+-- columns still when the host's scrollbar gutter appears, and the folder
+-- subview (narrower than the panel) gets its own tile size.
+resultNodesFrom = function(list, grid)
   local nodes = {}
   local count = math.min(resultsShown, #list)
   flags.more = count < #list
   if isGrid() then
     local row = {}
     for index = 1, count do
-      row[#row + 1] = tile(list[index], index, list)
-      if #row == 5 then
-        nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
+      row[#row + 1] = tile(list[index], index, list, grid)
+      if #row == GRID.columns then
+        nodes[#nodes + 1] = ui.row({ width = grid.width, gap = GRID.gap, align = "stretch" }, row)
         row = {}
       end
     end
     if #row > 0 then
-      while #row < 5 do
+      while #row < GRID.columns do
         row[#row + 1] = ui.spacer({ flexGrow = 1 })
       end
-      nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
+      nodes[#nodes + 1] = ui.row({ width = grid.width, gap = GRID.gap, align = "stretch" }, row)
     end
   else
     for index = 1, count do
@@ -2953,12 +3129,20 @@ editState.folderTileClick = function(row)
 end
 
 local function editTile(row, position, onClick)
+  local key = "ecard-" .. position
   local card = nil
+  local badges = nil
   if row.type == "folder" then
     card = folderCard(
-      folderResult(row), false, "ecard-" .. position,
-      editState.expanded[row.id] == true, true, true
+      folderResult(row), false, key,
+      editState.expanded[row.id] == true, TILE.size
     )
+    -- The member count is an editor-only badge; the normal grid hides it.
+    badges = cardBadges(key, TILE.size, nil, ui.label({
+      text = tostring(#(row.entries or {})),
+      fontSize = 10,
+      color = "on_surface_variant",
+    }))
   else
     local entry = findAppByPath(row.id)
     if entry == nil then
@@ -2971,16 +3155,20 @@ local function editTile(row, position, onClick)
       origin = entry.origin,
       pinned = row.pinned == true,
     }
-    -- The drag source is a horizontal flex, so the card needs flexGrow to fill
-    -- the cell; without it the tile hugs its content and the name never wraps.
-    card = tileCard(result, false, "ecard-" .. position, row.pinned == true, true)
+    card = tileCard(result, false, key, TILE.size)
+    badges = cardBadges(key, TILE.size, row.pinned == true, originBadge(result.origin, 12))
+  end
+  local children = { card }
+  if badges ~= nil then
+    children[#children + 1] = badges
   end
   -- The wrappers stay invisible: only the card paints, so an editor tile looks
   -- exactly like a normal one. The zone is a column so the source stretches
-  -- across the cell, and the source grows so the card fills it.
+  -- across the cell, and the inner column gives the badge overlay a column
+  -- parent to translate against (the source itself is a row).
   return ui.dropZone({
     key = "ezone-" .. position,
-    height = TILE_HEIGHT,
+    height = TILE.size,
     flexGrow = 1,
     direction = "column",
     align = "stretch",
@@ -2992,11 +3180,13 @@ local function editTile(row, position, onClick)
       dragType = DRAG_TYPE,
       payload = row.id,
       previewAncestor = 0,
-      height = TILE_HEIGHT,
+      height = TILE.size,
       flexGrow = 1,
       align = "stretch",
       onClick = onClick,
-    }, { card }),
+    }, {
+      ui.column({ height = TILE.size, flexGrow = 1, align = "stretch" }, children),
+    }),
   })
 end
 
@@ -3015,10 +3205,16 @@ editState.editMemberTile = function(folder, position, member, path)
     origin = entry.origin,
     pinned = false,
   }
-  local card = tileCard(result, false, "ecard-" .. position .. "-" .. member, false, true)
+  local key = "ecard-" .. position .. "-" .. member
+  local card = tileCard(result, false, key, TILE.size)
+  local badges = cardBadges(key, TILE.size, nil, originBadge(result.origin, 12))
+  local children = { card }
+  if badges ~= nil then
+    children[#children + 1] = badges
+  end
   return ui.dropZone({
     key = "ezone-" .. position .. "-" .. member,
-    height = TILE_HEIGHT,
+    height = TILE.size,
     flexGrow = 1,
     direction = "column",
     align = "stretch",
@@ -3030,10 +3226,12 @@ editState.editMemberTile = function(folder, position, member, path)
       dragType = DRAG_TYPE,
       payload = path,
       previewAncestor = 0,
-      height = TILE_HEIGHT,
+      height = TILE.size,
       flexGrow = 1,
       align = "stretch",
-    }, { card }),
+    }, {
+      ui.column({ height = TILE.size, flexGrow = 1, align = "stretch" }, children),
+    }),
   })
 end
 
@@ -3042,7 +3240,7 @@ end
 editState.editShrinkTile = function(folder, position)
   return ui.column({
     key = "eshrink-" .. position,
-    height = TILE_HEIGHT,
+    height = TILE.size,
     flexGrow = 1,
     align = "stretch",
     justify = "center",
@@ -3054,7 +3252,7 @@ editState.editShrinkTile = function(folder, position)
       fontSize = 11,
       glyphSize = 20,
       variant = "ghost",
-      height = TILE_HEIGHT,
+      height = TILE.size,
       flexGrow = 1,
       onClick = function()
         editState.expanded[folder.id] = nil
@@ -3124,17 +3322,17 @@ local function editNodes()
     local node = editState.editNodeFor(cell)
     if node ~= nil then
       row[#row + 1] = node
-      if #row == 5 then
-        nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
+      if #row == GRID.columns then
+        nodes[#nodes + 1] = ui.row({ width = GRID.main.width, gap = GRID.gap, align = "stretch" }, row)
         row = {}
       end
     end
   end
   if #row > 0 then
-    while #row < 5 do
+    while #row < GRID.columns do
       row[#row + 1] = ui.spacer({ flexGrow = 1 })
     end
-    nodes[#nodes + 1] = ui.row({ gap = 8, align = "stretch" }, row)
+    nodes[#nodes + 1] = ui.row({ width = GRID.main.width, gap = GRID.gap, align = "stretch" }, row)
   end
   flags.more = shown < #cells
   return nodes
@@ -3383,31 +3581,6 @@ end
 -- card at the bottom, so the mask is sized to the card and shifted back out
 -- onto it. The wrapper around it is left unclipped for that overflow.
 --
--- Kept in one table because the main chunk is at Luau's 200-local cap.
-local PANEL = {
-  width = 560,
-  height = 500,
-  padding = 14,
-  contentWidth = 560 - 14 * 2,
-  contentHeight = 500 - 14 * 2,
-  -- Style::radiusXl: the panel card's base corner radius. The host scales it
-  -- by shell.corner_radius_scale, while plugin node radii are also multiplied
-  -- by accessibility.ui_scale, so convert back into plugin units.
-  radius = 12,
-}
-
-PANEL.cardRadius = function()
-  local corner = setting("shell.corner_radius_scale", 1)
-  if type(corner) ~= "number" or corner < 0 then
-    corner = 1
-  end
-  local uiScale = setting("accessibility.ui_scale", 1)
-  if type(uiScale) ~= "number" or uiScale <= 0 then
-    uiScale = 1
-  end
-  return PANEL.radius * corner / uiScale
-end
-
 local function folderMask()
   local body = nil
   if #folderResults == 0 then
@@ -3422,12 +3595,12 @@ local function folderMask()
       key = "folder-scroll-" .. (folderOpen.id or ""),
       flexGrow = 1,
       gap = 6,
-    }, resultNodesFrom(folderResults))
+    }, resultNodesFrom(folderResults, GRID.folder))
   end
   local subview = ui.column({
     key = "folder-subview",
-    width = 420,
-    height = 360,
+    width = GRID.folderWidth,
+    height = GRID.folderHeight,
     fill = "surface_container_high",
     radius = 14,
     border = "outline_variant",
@@ -3468,16 +3641,17 @@ local function folderMask()
   if cardAlpha < 1 then
     subview.props.opacity = cardAlpha
   end
+  local borderInset, maskRadius = PANEL.borderInset()
   local mask = ui.column({
     key = "folder-mask",
-    width = PANEL.width,
-    height = PANEL.height,
+    width = PANEL.width - borderInset * 2,
+    height = PANEL.height - borderInset * 2,
     -- The mask is the wrapper's second child, i.e. one content height below the
-    -- tree's origin. Shifting it back by that plus the host inset lands it on
-    -- the card's top-left corner, so it covers the card exactly.
-    translateX = -PANEL.padding,
-    translateY = -(PANEL.contentHeight + PANEL.padding),
-    radius = PANEL.cardRadius(),
+    -- tree's origin. Shifting it back by the host inset plus the border inset
+    -- lands it on the card's inner edge, leaving the host border visible.
+    translateX = borderInset - PANEL.padding,
+    translateY = borderInset - (PANEL.contentHeight + PANEL.padding),
+    radius = maskRadius,
     fill = "scrim/0.55",
     align = "center",
     justify = "center",
@@ -3496,6 +3670,26 @@ function render()
   end
 
   flags.more = false
+
+  -- Resolve the icons for the rows this render will paint before building the
+  -- tree. A cold cache therefore shows the first page with its final icons;
+  -- fixed slots still keep later pages stable if a lookup hits the budget.
+  if mode == "normal" then
+    local visible = math.min(resultsShown, #results)
+    if isGrid() then
+      warmVisibleIcons(results, visible, TILE.metrics(GRID.main.tile))
+      -- Folder tiles paint up to four member previews at their own size.
+      warmVisibleIcons(results, visible, TILE.mini(GRID.main.tile), true)
+    else
+      warmVisibleIcons(results, visible, 32)
+    end
+    if folderOpen ~= nil and #folderResults > 0 then
+      -- The folder subview paints its member cards (its own, narrower icon
+      -- size) and the previews in the tiles behind the scrim.
+      warmVisibleIcons(folderResults, #folderResults, TILE.metrics(GRID.folder.tile))
+      warmVisibleIcons(folderResults, #folderResults, TILE.mini(GRID.folder.tile))
+    end
+  end
 
   local root = nil
   if mode == "edit" then
@@ -4043,6 +4237,12 @@ function onFrameTick(deltaMs)
       return
     end
   end
+  if #iconQueue == 0 and iconStore.dirty and not flags.more and not flags.render then
+    -- Warm lookups fill the cache outside the queue drain, so persist here too
+    -- once a frame settles.
+    saveIconCache()
+    iconStore.dirty = false
+  end
   if #iconQueue == 0 and not flags.more and not flags.icons and not flags.render
       and not anim.active() then
     panel.setNeedsFrameTick(false)
@@ -4095,5 +4295,11 @@ function onClose()
   lastRight.index = nil
   flags.apps = false
   calc.seq = calc.seq + 1
+  -- Warming resolves icons outside the tick drain, so persist them here as well
+  -- as when the queue settles.
+  if iconStore.dirty then
+    saveIconCache()
+    iconStore.dirty = false
+  end
   panel.setNeedsFrameTick(false)
 end
