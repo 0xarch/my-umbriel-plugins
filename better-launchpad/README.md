@@ -183,14 +183,17 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   here), and the folder subview's scrim fades in and out over 250 ms. The card
   itself is never scaled or translated, and the easing is applied to the distance
   travelled so the closing scrim fades instead of lingering and snapping away.
-  Opening moves only the scrim's own alpha and leaves the card fully opaque:
-  fading the card with group opacity blends its fill over the still-light grid,
-  so mid-fade it looks darker than its settled colour and reads as a flash rather
-  than a fade. The grid keeps its hover highlight, keyboard selection and scroll
-  offset for the same reason. The search field drops the keyboard only once the
-  opening veil is opaque and re-takes it only after the close fade has finished,
-  because a new input key (the API's only way to move focus) rebuilds the control
-  and would flash the field under a still-transparent veil.
+  The overlay is staged rather than cross-faded: opening moves the veil's own
+  alpha over the first 40% of the fade, then fades the card in over the now
+  constant veil; closing runs the sequence backwards. A single cross-fade blends
+  the card against a backdrop whose brightness is still moving, so its colour
+  visibly drifts mid-fade and reads as a flash instead of a fade. Group opacity
+  on the mask is never used (the card would fade with it), and the grid keeps its
+  hover highlight, keyboard selection and scroll offset unchanged, because any
+  repaint under the veil shows through it. The search field drops the keyboard
+  only once the opening veil is opaque and re-takes it only after the close fade
+  has finished, because a new input key (the API's only way to move focus)
+  rebuilds the control and would flash the field under a still-transparent veil.
   Progress
   is measured against `noctalia.nowMs`, not the frame delta, because the first
   delta after an idle surface can span the whole gap and would skip the fade in

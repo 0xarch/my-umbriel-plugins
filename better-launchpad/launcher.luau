@@ -273,9 +273,10 @@ anim.easeOut = function(t)
   return 1 - inv * inv
 end
 
--- Opacity of the whole overlay. `anim.folder` moves linearly toward the target,
--- so easing has to be applied to the distance travelled: with a raw easeOut the
--- closing scrim would stay opaque for most of the fade and then snap away.
+-- Progress of the whole overlay. `anim.folder` moves linearly toward the
+-- target, so easing has to be applied to the distance travelled: with a raw
+-- easeOut the closing scrim would stay opaque for most of the fade and then
+-- snap away.
 anim.folderOpacity = function()
   local from, target = anim.folderFrom, anim.folderTarget
   if from == target then
@@ -284,6 +285,20 @@ anim.folderOpacity = function()
   local p = (anim.folder - from) / (target - from)
   p = math.min(1, math.max(0, p))
   return from + (target - from) * anim.easeOut(p)
+end
+
+-- The overlay fades in two stages instead of one cross-fade. The veil darkens
+-- first while the card is still invisible, then the card fades in over the now
+-- constant veil; closing runs the same sequence backwards. A single cross-fade
+-- blends the card against a backdrop whose brightness is still moving, so its
+-- colour visibly drifts mid-fade and reads as a flash instead of a fade.
+anim.veilShare = 0.4
+
+anim.folderLayers = function()
+  local p = anim.folderOpacity()
+  local veil = math.min(1, p / anim.veilShare)
+  local card = math.max(0, (p - anim.veilShare) / (1 - anim.veilShare))
+  return veil, card
 end
 
 -- Advance both animations to the current wall clock. Returns true when the tree
@@ -3394,7 +3409,6 @@ PANEL.cardRadius = function()
 end
 
 local function folderMask()
-  local progress = anim.folderOpacity()
   local body = nil
   if #folderResults == 0 then
     body = ui.label({
@@ -3445,10 +3459,15 @@ local function folderMask()
     }),
     body,
   })
-  -- Never transform this node: a transformed clipped flex card makes its visual
-  -- bounds disagree with the layout bounds, leaving asymmetric gaps at the
-  -- panel edges while it opens or closes. Opening also avoids group opacity,
-  -- which would fade the card along with the veil (see below).
+  -- Stage the two layers (see anim.folderLayers): the veil's alpha moves over
+  -- the first 40% of the fade, the card's own opacity over the rest. The card is
+  -- never transformed: a transformed clipped flex makes its visual bounds
+  -- disagree with the layout bounds, which shows as asymmetric gaps at the
+  -- panel edges, so fading it in place is the only visual change it gets.
+  local veil, cardAlpha = anim.folderLayers()
+  if cardAlpha < 1 then
+    subview.props.opacity = cardAlpha
+  end
   local mask = ui.column({
     key = "folder-mask",
     width = PANEL.width,
@@ -3465,19 +3484,8 @@ local function folderMask()
     clip = true,
     onClick = function() closeFolder() end,
   }, { subview })
-  if anim.folderTarget == 1 then
-    -- Opening: only the veil's own alpha moves. Group opacity would fade the
-    -- card as well, blending its fill over the still-light grid; mid-fade the
-    -- card looks darker and muddier than its settled colour, which reads as a
-    -- flash rather than a fade. The card stays fully opaque here, so the only
-    -- thing that changes frame to frame is the scrim behind it.
-    if progress < 1 then
-      mask.props.fill = string.format("scrim/%.3f", 0.55 * progress)
-    end
-  elseif progress < 1 then
-    -- Closing: the card and veil fade together, so the card never lingers
-    -- opaque and then disappears when the progress reaches zero.
-    mask.props.opacity = progress
+  if veil < 1 then
+    mask.props.fill = string.format("scrim/%.3f", 0.55 * veil)
   end
   return mask
 end
