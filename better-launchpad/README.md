@@ -222,7 +222,10 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   antialiasing clearance inside, when panel borders are on) so the host's border
   ring stays visible all the way round instead of being painted over, and its
   radius is `Style::radiusXl` times `shell.corner_radius_scale` minus that
-  inset, which matches the host's rounded corner.
+  inset, which matches the host's rounded corner. The ring itself is drawn by
+  Noctalia (it is the panel card's border, not a plugin node), so the plugin can
+  only avoid covering it; at fractional output scales the host's 1 px ring can
+  still look uneven between edges, independently of this plugin.
 - The grid always renders inside a keyed `content` wrapper under the keyed
   `panel-root`; a folder only adds the scrim as a sibling. Building the root
   differently while a folder is open made the host's reconciler see a (type,
