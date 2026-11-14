@@ -2636,18 +2636,27 @@ local GRID = {
   gap = 8,
   gutter = 14,
   folderWidth = 420,
-  folderHeight = 360,
+  folderColumns = 3,
+  folderRows = 2,
+  folderGap = 12,
+  folderPadding = 12,
 }
-GRID.metrics = function(availableWidth)
+GRID.metrics = function(availableWidth, columns, gap)
+  columns = columns or GRID.columns
+  gap = gap or GRID.gap
   local usableWidth = math.max(0, availableWidth - GRID.gutter)
-  local tile = math.floor((usableWidth - (GRID.columns - 1) * GRID.gap) / GRID.columns)
+  local tile = math.floor((usableWidth - (columns - 1) * gap) / columns)
   return {
     tile = tile,
-    width = GRID.columns * tile + (GRID.columns - 1) * GRID.gap,
+    columns = columns,
+    gap = gap,
+    width = columns * tile + (columns - 1) * gap,
   }
 end
 GRID.main = GRID.metrics(PANEL.contentWidth)
-GRID.folder = GRID.metrics(GRID.folderWidth)
+GRID.folder = GRID.metrics(GRID.folderWidth - GRID.folderPadding * 2, GRID.folderColumns, GRID.folderGap)
+GRID.folderHeight = 44 + GRID.folderPadding * 2 + GRID.folderRows * GRID.folder.tile
+    + (GRID.folderRows - 1) * GRID.folderGap
 local ROW_HEIGHT = 54
 
 -- Right-click handling. Only a button receives right-clicks in a panel, so each
@@ -2702,22 +2711,26 @@ local TILE = {
   icon = 44,
   name = 30,
   nameMin = 24,
-  folderName = 18,
+  folderName = 40,
+  folderPad = 8,
+  folderGap = 8,
   miniMax = 19,
   gap = 4,
 }
 TILE.size = GRID.main.tile
 
 -- A tile's bands follow its size: the main grid is wide enough for the 44 px
--- icon and the two-line name band. Narrow folder tiles use one full name line
--- with a matching band height, leaving room for the normal icon size.
+-- icon and the two-line name band. The larger folder cards give both the name
+-- and the icon more breathing room without changing the main grid.
 TILE.metrics = function(size)
-  local inner = size - TILE.pad * 2 - TILE.gap
-  local compact = size < TILE.size
-  local nameMin = compact and TILE.folderName or TILE.nameMin
+  local roomy = size > TILE.size
+  local pad = roomy and TILE.folderPad or TILE.pad
+  local gap = roomy and TILE.folderGap or TILE.gap
+  local inner = size - pad * 2 - gap
+  local nameMin = roomy and TILE.folderName or TILE.nameMin
   local icon = math.max(0, math.min(TILE.icon, inner - nameMin))
-  local name = math.max(0, math.min(compact and TILE.folderName or TILE.name, inner - icon))
-  return icon, name, compact and 1 or 2
+  local name = math.max(0, math.min(roomy and TILE.folderName or TILE.name, inner - icon))
+  return icon, name, pad, gap
 end
 
 -- Folder previews pack four mini icons in a 2x2 grid with a 2 px gap.
@@ -2790,12 +2803,12 @@ end
 -- centred as a group. The name band has an explicit width so a long name wraps
 -- inside the tile instead of overflowing it.
 local function cardColumn(key, size, focused, icon, title)
-  local iconSize, nameSize, nameLines = TILE.metrics(size)
+  local iconSize, nameSize, pad, gap = TILE.metrics(size)
   return ui.column({
     key = key,
     height = size,
-    gap = TILE.gap,
-    padding = TILE.pad,
+    gap = gap,
+    padding = pad,
     align = "center",
     justify = "center",
     radius = 10,
@@ -2803,7 +2816,7 @@ local function cardColumn(key, size, focused, icon, title)
   }, {
     ui.row({ width = iconSize, height = iconSize, align = "center", justify = "center" }, { icon }),
     ui.column({
-      width = size - TILE.pad * 2,
+      width = size - pad * 2,
       height = nameSize,
       align = "center",
       justify = "start",
@@ -2812,8 +2825,8 @@ local function cardColumn(key, size, focused, icon, title)
       ui.label({
         text = title,
         fontSize = 11,
-        maxLines = nameLines,
-        maxWidth = size - TILE.pad * 2,
+        maxLines = 2,
+        maxWidth = size - pad * 2,
         textAlign = "center",
         color = focused and "on_surface" or "on_surface_variant",
       }),
@@ -2939,16 +2952,16 @@ resultNodesFrom = function(list, grid)
     local row = {}
     for index = 1, count do
       row[#row + 1] = tile(list[index], index, list, grid)
-      if #row == GRID.columns then
-        nodes[#nodes + 1] = ui.row({ width = grid.width, gap = GRID.gap, align = "stretch" }, row)
+      if #row == grid.columns then
+        nodes[#nodes + 1] = ui.row({ width = grid.width, gap = grid.gap, align = "stretch" }, row)
         row = {}
       end
     end
     if #row > 0 then
-      while #row < GRID.columns do
+      while #row < grid.columns do
         row[#row + 1] = ui.spacer({ flexGrow = 1 })
       end
-      nodes[#nodes + 1] = ui.row({ width = grid.width, gap = GRID.gap, align = "stretch" }, row)
+      nodes[#nodes + 1] = ui.row({ width = grid.width, gap = grid.gap, align = "stretch" }, row)
     end
   else
     for index = 1, count do
@@ -3568,7 +3581,8 @@ local function folderMask()
     body = ui.scroll({
       key = "folder-scroll-" .. (folderOpen.id or ""),
       flexGrow = 1,
-      gap = 6,
+      gap = GRID.folderGap,
+      padding = GRID.folderPadding,
     }, resultNodesFrom(folderResults, GRID.folder))
   end
   local subview = ui.column({
