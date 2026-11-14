@@ -389,7 +389,6 @@ local RIGHT_CLICK_WINDOW = 2
 -- Forward declarations for functions used by asynchronous callbacks and by
 -- helpers defined before them.
 local refresh
-local warmVisibleIcons
 local resolvePinned
 local focusInput
 local renderNormal
@@ -2372,7 +2371,7 @@ local ICON_LOOKUP_BUDGET_MS = 10
 local ICONS_PER_TICK = 12
 local iconQueue = {}
 local iconQueued = {}
-local iconStore = { loaded = false, dirty = false, warm = {} }
+local iconStore = { loaded = false, dirty = false, byApp = {} }
 
 local function iconCacheFile()
   local dataDir = noctalia.pluginDataDir()
@@ -2396,6 +2395,10 @@ local function loadIconCache()
     -- A theme switch or uninstall leaves dead paths behind; drop them here.
     if type(value) == "string" and value ~= "" and noctalia.fileExists(value) then
       iconCache[key] = value
+      local name = key:match("^(.*)@%d+$")
+      if name ~= nil and iconStore.byApp[name] == nil then
+        iconStore.byApp[name] = value
+      end
     end
   end
 end
@@ -2420,8 +2423,7 @@ local function queueIcon(name, size)
   end
   -- The layout editor redraws every stored tile on each change; a lookup queue
   -- there would re-render the whole grid per icon batch. Cached paths and the
-  -- glyph fallback are enough, and entering the editor from the grid has
-  -- already warmed the cache for every visible app.
+  -- glyph fallback are enough while the normal view's queue resolves icons.
   if mode == "edit" then
     return
   end
@@ -2445,6 +2447,13 @@ local function resolveIcon(name, size)
   local cached = iconCache[key]
   if cached == nil then
     queueIcon(name, size)
+    -- A path cached at another size is still a stable image while the exact
+    -- size is resolved. This avoids a cold-size placeholder when the theme or
+    -- layout changed, and fit=contain scales the existing path safely.
+    local fallback = iconStore.byApp[name]
+    if fallback ~= nil then
+      return fallback, false
+    end
     return nil, true
   end
   if cached == false then
@@ -2484,9 +2493,10 @@ local function iconNode(result, width, height)
     if path ~= nil then
       child = ui.image({ path = path, width = width, height = height, fit = "contain" })
     elseif pending then
-      -- A quiet placeholder holds the slot for the frame or two before the
-      -- queued lookup lands; no wrong glyph flashes first.
-      child = ui.box({ width = width, height = height, radius = 6, fill = "surface_container_high" })
+      -- Leave the slot empty for the frame or two before the queued lookup
+      -- lands. An empty slot is quieter than a placeholder box that appears
+      -- and is immediately replaced; the layout stays identical either way.
+      child = nil
     else
       child = ui.glyph({
         name = result.glyph or "app-window",
@@ -2496,71 +2506,6 @@ local function iconNode(result, width, height)
     end
   end
   return ui.row({ width = width, height = height, align = "center", justify = "center" }, { child })
-end
-
--- Warm the icons that the next render will actually show. This keeps the first
--- visible page from painting placeholders and then replacing them one by one;
--- the fixed slot still protects later pages if a theme lookup exceeds the
--- budget. The state guard avoids repeating work for hover-only renders.
-warmVisibleIcons = function(list, count, size, members)
-  -- Keyed by scope and size because the main grid, the folder previews and the
-  -- folder subview warm different lists in the same render; one shared slot
-  -- would redo all of them every frame.
-  local stateKey = (members and "m" or "") .. tostring(size)
-  local state = iconStore.warm[stateKey]
-  if state == nil then
-    state = { list = nil, count = 0 }
-    iconStore.warm[stateKey] = state
-  end
-  if state.list == list and state.count >= count then
-    return
-  end
-  state.list = list
-  state.count = count
-
-  -- Collect the names first so the budget check stays in a single loop: with
-  -- `members` the names come from each folder's preview slots, otherwise from
-  -- the results themselves.
-  local names = {}
-  for index = 1, math.min(count, #list) do
-    local result = list[index]
-    if result ~= nil then
-      if members then
-        local folder = result.folder
-        if type(folder) == "table" and type(folder.entries) == "table" then
-          for _, path in ipairs(folder.entries) do
-            local entry = findAppByPath(path)
-            if entry ~= nil then
-              names[#names + 1] = entry.icon ~= "" and entry.icon or "application-x-executable"
-            end
-          end
-        end
-      elseif result.imagePath == nil and result.emoji == nil then
-        names[#names + 1] = result.iconName
-      end
-    end
-  end
-
-  local started = os.clock()
-  for _, name in ipairs(names) do
-    if type(name) == "string" and name ~= "" then
-      local key = name .. "@" .. tostring(size)
-      if iconCache[key] == nil then
-        local path = noctalia.appIconPath(name, size)
-        if type(path) == "string" and path ~= "" then
-          iconCache[key] = path
-          iconStore.dirty = true
-        else
-          iconCache[key] = false
-        end
-        if (os.clock() - started) * 1000 >= ICON_LOOKUP_BUDGET_MS then
-          -- Retry the visible range on the next render; cached entries are cheap.
-          state.count = 0
-          break
-        end
-      end
-    end
-  end
 end
 
 -- The shell marks Flatpak/Snap and AppImage entries with a small glyph; other
@@ -2635,9 +2580,11 @@ end
 -- The host strokes the card's border inside its rounded rect. The folder scrim
 -- is sized to the card, so painting it corner-to-corner covered that border and
 -- the card looked borderless while a folder was open. Keep the scrim on the
--- card's inner edge instead, with the matching inner radius. Returns the inset
--- and radius in plugin units: the host strokes in logical pixels, while plugin
--- node values are multiplied by accessibility.ui_scale.
+-- card's inner edge instead, with the matching inner radius. The extra logical
+-- pixel keeps the scrim's antialiased edge off the ring: at fractional output
+-- scales a 1 px ring is already thin enough that a feathered overlap eats it.
+-- Returns the inset and radius in plugin units: the host strokes in logical
+-- pixels, while plugin node values are multiplied by accessibility.ui_scale.
 PANEL.borderInset = function()
   if setting("shell.panel.borders", true) ~= true then
     return 0, PANEL.cardRadius()
@@ -2650,7 +2597,7 @@ PANEL.borderInset = function()
   if type(uiScale) ~= "number" or uiScale <= 0 then
     uiScale = 1
   end
-  local inset = width / uiScale
+  local inset = (width + 1) / uiScale
   return inset, math.max(0, PANEL.cardRadius() - inset)
 end
 
@@ -3671,26 +3618,10 @@ function render()
 
   flags.more = false
 
-  -- Resolve the icons for the rows this render will paint before building the
-  -- tree. A cold cache therefore shows the first page with its final icons;
-  -- fixed slots still keep later pages stable if a lookup hits the budget.
-  if mode == "normal" then
-    local visible = math.min(resultsShown, #results)
-    if isGrid() then
-      warmVisibleIcons(results, visible, TILE.metrics(GRID.main.tile))
-      -- Folder tiles paint up to four member previews at their own size.
-      warmVisibleIcons(results, visible, TILE.mini(GRID.main.tile), true)
-    else
-      warmVisibleIcons(results, visible, 32)
-    end
-    if folderOpen ~= nil and #folderResults > 0 then
-      -- The folder subview paints its member cards (its own, narrower icon
-      -- size) and the previews in the tiles behind the scrim.
-      warmVisibleIcons(folderResults, #folderResults, TILE.metrics(GRID.folder.tile))
-      warmVisibleIcons(folderResults, #folderResults, TILE.mini(GRID.folder.tile))
-    end
-  end
-
+  -- Icon lookups stay on the existing frame-bounded queue. Synchronous theme
+  -- resolution here can perform filesystem work and exceed the panel callback
+  -- budget before the first tree is even submitted; fixed-size slots keep the
+  -- layout stable while queued icons arrive.
   local root = nil
   if mode == "edit" then
     root = renderEdit()
@@ -4196,6 +4127,7 @@ function onFrameTick(deltaMs)
         table.remove(iconQueue, 1)
         if type(path) == "string" and path ~= "" then
           iconCache[job.key] = path
+          iconStore.byApp[job.name] = path
           iconStore.dirty = true
           resolved = resolved + 1
         else
@@ -4236,12 +4168,6 @@ function onFrameTick(deltaMs)
       panel.setNeedsFrameTick(false)
       return
     end
-  end
-  if #iconQueue == 0 and iconStore.dirty and not flags.more and not flags.render then
-    -- Warm lookups fill the cache outside the queue drain, so persist here too
-    -- once a frame settles.
-    saveIconCache()
-    iconStore.dirty = false
   end
   if #iconQueue == 0 and not flags.more and not flags.icons and not flags.render
       and not anim.active() then
@@ -4295,11 +4221,5 @@ function onClose()
   lastRight.index = nil
   flags.apps = false
   calc.seq = calc.seq + 1
-  -- Warming resolves icons outside the tick drain, so persist them here as well
-  -- as when the queue settles.
-  if iconStore.dirty then
-    saveIconCache()
-    iconStore.dirty = false
-  end
   panel.setNeedsFrameTick(false)
 end

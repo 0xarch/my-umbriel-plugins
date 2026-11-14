@@ -167,18 +167,18 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   narrower than the panel, so it derives its own square tile size, and its icon
   and name bands shrink to fit instead of overflowing the smaller tile.
 - Large catalogs render in chunks of ten results per frame, and icon-theme
-  lookups run in a separate frame pass with a small time budget. Before a
-  render paints a page whose icons are still unknown, it warms that page and the
-  folder previews already on it (same 10 ms budget) so a cold cache shows its
-  final icons on the first frame instead of placeholders that swap in one by one;
-  an icon that still cannot be resolved
-  keeps a fixed-size slot and shows a neutral placeholder, never a differently
-  sized glyph. The layout editor uses the same chunking (and never queues icon
-  lookups), so opening it with a large catalog cannot overrun the 25 ms callback
-  budget and make the host disable the panel. Resolved icon
-  paths are cached in `icon-cache.json` under the plugin data directory, so
-  reopening the panel draws every icon immediately; entries whose file no
-  longer exists (theme switch, uninstall) are dropped on load.
+  lookups run in a separate frame pass with a small time budget. Opening the
+  panel only queues lookups; filesystem-backed theme resolution never runs in
+  the `onOpen` callback. A fixed-size icon slot stays in the layout while the
+  queue resolves, and an icon cached at another size is used immediately while
+  the exact-size path is refined in a later frame. A genuinely cold icon leaves
+  the slot empty until it resolves, rather than flashing a temporary glyph or
+  box that changes shape. The layout editor uses the same chunking (and never
+  queues icon lookups), so opening it with a large catalog cannot overrun the
+  25 ms callback budget and make the host disable the panel. Resolved icon paths
+  are cached in `icon-cache.json` under the plugin data directory, so reopening
+  the panel draws every icon immediately; entries whose file no longer exists
+  (theme switch, uninstall) are dropped on load.
 - Flatpak and Snap entries show a package badge in the tile's bottom-right
   corner, and AppImage entries show the AppImage badge there. The badge's origin
   label appears as the tile tooltip.
@@ -218,11 +218,11 @@ directory, so uninstalling the plugin does not disturb the shell's history.
   scrim is sized to the card and shifted back out by one content height plus the
   inset; sizing it to the tree instead leaves the card's padding visible on the
   left, top and right while spilling past the card at the bottom. It stops at
-  the card's inner edge (one `shell.panel.border_width` inside, when panel
-  borders are on) so the host's border ring stays visible all the way round
-  instead of being painted over, and its radius is `Style::radiusXl` times
-  `shell.corner_radius_scale` minus that inset, which matches the host's rounded
-  corner.
+  the card's inner edge (one `shell.panel.border_width` plus one logical pixel of
+  antialiasing clearance inside, when panel borders are on) so the host's border
+  ring stays visible all the way round instead of being painted over, and its
+  radius is `Style::radiusXl` times `shell.corner_radius_scale` minus that
+  inset, which matches the host's rounded corner.
 - The grid always renders inside a keyed `content` wrapper under the keyed
   `panel-root`; a folder only adds the scrim as a sibling. Building the root
   differently while a folder is open made the host's reconciler see a (type,
