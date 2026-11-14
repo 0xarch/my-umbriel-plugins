@@ -1612,9 +1612,6 @@ local function launchApplication(entry)
     and entry.path:match("/applications/[^/]+%.desktop$") ~= nil
   if desktopIdLookup and type(entry.id) == "string" and entry.id ~= "" and noctalia.commandExists("gtk-launch") then
     local ok = noctalia.runAsync({ "gtk-launch", entry.id })
-    if entry.id == "com.qq.QQ" then
-      noctalia.log("[Better Launchpad] com.qq.QQ via gtk-launch accepted=" .. tostring(ok))
-    end
     if ok then
       return true
     end
@@ -1623,34 +1620,15 @@ local function launchApplication(entry)
   local gio = noctalia.commandExists("gio")
   if gio then
     local ok = noctalia.runAsync({ "gio", "launch", entry.path }, function(result)
-      if entry.id == "com.qq.QQ" then
-        local exitCode, timedOut = "missing", "missing"
-        if type(result) == "table" then
-          exitCode = tostring(result.exitCode)
-          timedOut = tostring(result.timedOut)
-        end
-        noctalia.log("[Better Launchpad] com.qq.QQ gio result exit=" .. tostring(exitCode)
-          .. " timeout=" .. tostring(timedOut))
-      end
       if result ~= nil and result.exitCode ~= 0 then
-        local fallback = launchExec(entry)
-        if entry.id == "com.qq.QQ" then
-          noctalia.log("[Better Launchpad] com.qq.QQ Exec fallback accepted=" .. tostring(fallback))
-        end
+        launchExec(entry)
       end
     end)
-    if entry.id == "com.qq.QQ" then
-      noctalia.log("[Better Launchpad] com.qq.QQ via gio accepted=" .. tostring(ok))
-    end
     if ok then
       return true
     end
   end
-  local fallback = launchExec(entry)
-  if entry.id == "com.qq.QQ" then
-    noctalia.log("[Better Launchpad] com.qq.QQ direct Exec accepted=" .. tostring(fallback))
-  end
-  return fallback
+  return launchExec(entry)
 end
 
 -- ── result building ─────────────────────────────────────────────────────────
