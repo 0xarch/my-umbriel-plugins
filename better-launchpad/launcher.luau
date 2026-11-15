@@ -4035,8 +4035,9 @@ function onSubmit(value)
     return
   end
   if type(value) == "string" and value ~= query then
-    query = value
-    refresh()
+    -- Submit may carry newer text than the last change callback. Apply the
+    -- same first-result reset before choosing an activation target.
+    onQueryChanged(value)
   end
   activate(selected)
 end
@@ -4066,6 +4067,12 @@ function onResultHover(state, key)
   if not isOpen then
     return
   end
+  -- Reflow can report hover beneath a stationary pointer after typing. Hover
+  -- carries no motion information, so keep search selection keyboard-owned;
+  -- overlay clicks still activate their own result directly.
+  if folderOpen == nil and query ~= "" then
+    return
+  end
   if state == "true" then
     -- Tiles and rows report the transparent overlay button's key.
     local index = tonumber(string.match(key or "", "^ov%-(%d+)$"))
@@ -4080,7 +4087,7 @@ function onResultHover(state, key)
     keyboardFocus = false
     selected = index
     render()
-  elseif hoverIndex ~= nil or keyboardFocus then
+  elseif hoverIndex ~= nil then
     -- The host reports a leave only for the tile that owns the hover, so any
     -- leave clears the pointer focus even if its key is not the one we stored.
     hoverIndex = nil
