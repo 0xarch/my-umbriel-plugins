@@ -2946,7 +2946,18 @@ local function listRow(result, index, list)
 end
 
 local function resultNodes()
-  return resultNodesFrom(results, GRID.main)
+  local nodes = resultNodesFrom(results, GRID.main)
+  -- Only this zero-size anchor changes identity when a query resets scrolling.
+  -- Keep it inside the first cell's zero-gap column so it adds no row or gap.
+  local first = isGrid() and nodes[1] and nodes[1].children[1] or nodes[1]
+  if first ~= nil then
+    table.insert(first.children, 1, ui.spacer({
+      key = "results-start-" .. scrollRev,
+      width = 0,
+      height = 0,
+    }))
+  end
+  return nodes
 end
 
 -- `list` is the tile model the overlay closures resolve against: the main
@@ -3778,10 +3789,12 @@ renderNormal = function()
     body = emptyState()
   else
     body = ui.scroll({
-      key = "results-" .. scrollRev,
+      -- Changing the scroll key destroys every result and image beneath it.
+      -- Reset the viewport through revealKey, retaining the scroll subtree.
+      key = "results",
       flexGrow = 1,
       gap = 6,
-      revealKey = "res-" .. selected,
+      revealKey = selected == 1 and "results-start-" .. scrollRev or "res-" .. selected,
     }, resultNodes())
   end
   root[#root + 1] = body
@@ -4217,7 +4230,10 @@ function onFrameTick(deltaMs)
       needsRender = true
     end
   end
-  if needsRender or flags.icons then
+  -- A lookup-only tick leaves flags.icons pending for a later render tick.
+  -- Rendering it here would combine both CPU-heavy phases and draw it again
+  -- when the pending flag is consumed on the next tick.
+  if needsRender then
     -- A render that overruns unwinds mid-tree; without this guard the pending
     -- flags would retry every frame until the host disables the panel.
     local ok = pcall(render)
