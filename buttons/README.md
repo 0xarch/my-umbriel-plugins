@@ -47,7 +47,7 @@
 
 ## 验证
 
-工作区根目录运行 `lua harness/buttons/drawer.lua`。该 harness 位于发布仓库外，使用内存文件系统和 mock 进程，不读取用户配置、不执行真实命令。
+工作区根目录运行 `python3 -B harness/buttons/manifest.py` 检查入口 ID 全局唯一、入口文件及目录版本一致，再运行 `lua harness/buttons/drawer.lua`。这些检查位于发布仓库外，使用内存文件系统和 mock 进程，不读取用户配置、不执行真实命令。
 
 需要人工 GUI 验证：
 
