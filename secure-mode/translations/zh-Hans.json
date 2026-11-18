@@ -1,0 +1,11 @@
+{
+  "title": "安全模式",
+  "settings": {
+    "style": { "label": "开启时的外观", "dot": "小圆点", "capsule": "胶囊" },
+    "text": { "label": "开启时的胶囊文本" },
+    "close_style": { "label": "关闭时的外观", "hidden": "隐藏" },
+    "close_text": { "label": "关闭时的胶囊文本" }
+  },
+  "status": { "on": "安全模式已开启 · 点击关闭", "off": "安全模式已关闭 · 点击开启", "busy": "正在应用安全模式…" },
+  "error": { "storage": "无法访问插件存储目录。", "operation": "无法确认安全模式状态。点击恢复已保存状态，或通过 IPC 重试。" }
+}

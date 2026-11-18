@@ -1,0 +1,40 @@
+{
+  "title": "按钮抽屉",
+  "settings": {
+    "glyph": {
+      "label": "栏图标"
+    }
+  },
+  "add": "新增",
+  "edit": "编辑",
+  "done": "完成",
+  "layout": "布局",
+  "save": "保存",
+  "cancel": "取消",
+  "close": "关闭",
+  "name": "名称",
+  "tooltip": "悬停提示名称（留空则使用名称）",
+  "glyph": "图标名称（留空则使用 terminal）",
+  "command": "Shell 命令",
+  "command_help": "通过 /bin/sh -c 在宿主环境执行，必要时使用绝对路径。保存不会执行命令。",
+  "move_earlier": "前移并保存",
+  "move_later": "后移并保存",
+  "delete": "删除",
+  "confirm_delete": "确认删除",
+  "rows": "行数（1–5）",
+  "columns": "列数（1–6）",
+  "close_on_run": "启动后关闭抽屉",
+  "layout_help": "行数 × 列数决定每页按钮数量，多余项目显示在后续页面。抽屉保持固定尺寸。",
+  "empty": "添加第一个命令按钮。",
+  "previous": "上一页",
+  "next": "下一页",
+  "edit_help": "点击按钮以编辑，编辑模式不会执行命令。",
+  "invalid_item": "名称和命令不能为空，请按 README 中的字段长度限制填写。",
+  "item_limit": "最多支持 200 个启动项。",
+  "launch_failed": "无法启动命令。",
+  "storage_unavailable": "无法访问插件存储，请重新打开抽屉重试。",
+  "invalid_storage": "items.json 损坏或格式不受支持。文件已保留，请修复后重新打开抽屉。",
+  "storage_changed": "存储已被其他实例修改，请重新打开抽屉后再保存。",
+  "storage_too_large": "无法编码数据，或数据超过 256 KiB 存储上限。",
+  "save_failed": "保存失败，编辑内容已保留。请检查存储权限后重试。"
+}

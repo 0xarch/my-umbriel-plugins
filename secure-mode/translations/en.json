@@ -1,0 +1,11 @@
+{
+  "title": "Secure Mode",
+  "settings": {
+    "style": { "label": "Enabled appearance", "dot": "Dot", "capsule": "Capsule" },
+    "text": { "label": "Enabled capsule text" },
+    "close_style": { "label": "Disabled appearance", "hidden": "Hidden" },
+    "close_text": { "label": "Disabled capsule text" }
+  },
+  "status": { "on": "Secure mode enabled · click to disable", "off": "Secure mode disabled · click to enable", "busy": "Applying secure mode…" },
+  "error": { "storage": "Cannot access plugin storage.", "operation": "Could not confirm secure mode. Click to restore the saved state, or retry via IPC." }
+}

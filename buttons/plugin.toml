@@ -1,0 +1,37 @@
+id = "io.soloev/buttons"
+name = "Buttons"
+version = "0.1.0"
+plugin_api = 46
+author = "io.soloev"
+license = "MIT"
+dependencies = []
+tags = ["bar", "panel", "utility"]
+icon = "layout-grid"
+description = "A configurable drawer of shell-command buttons with a built-in editor."
+
+[[widget]]
+id = "buttons"
+entry = "button.luau"
+
+  [widget.actions]
+  middle = "none"
+
+  [[widget.setting]]
+  key = "glyph"
+  type = "glyph"
+  label_key = "settings.glyph.label"
+  default = "layout-grid"
+
+[[shortcut]]
+id = "buttons"
+entry = "shortcut.luau"
+
+[[panel]]
+id = "drawer"
+entry = "drawer.luau"
+width = 560
+height = 540
+placement = "attached"
+position = "top_right"
+dismiss_on_outside_click = true
+capture_keys = ["Prior", "Next"]

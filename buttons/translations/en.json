@@ -1,0 +1,40 @@
+{
+  "title": "Buttons",
+  "settings": {
+    "glyph": {
+      "label": "Bar icon"
+    }
+  },
+  "add": "Add",
+  "edit": "Edit",
+  "done": "Done",
+  "layout": "Layout",
+  "save": "Save",
+  "cancel": "Cancel",
+  "close": "Close",
+  "name": "Name",
+  "tooltip": "Tooltip (blank uses the name)",
+  "glyph": "Icon glyph name (blank uses terminal)",
+  "command": "Shell command",
+  "command_help": "Runs with /bin/sh -c in the host environment. Use absolute paths when needed. Save does not execute the command.",
+  "move_earlier": "Move earlier & save",
+  "move_later": "Move later & save",
+  "delete": "Delete",
+  "confirm_delete": "Confirm deletion",
+  "rows": "Rows (1–5)",
+  "columns": "Columns (1–6)",
+  "close_on_run": "Close drawer after launching",
+  "layout_help": "Rows × columns sets the number of buttons per page. Extra items appear on later pages. The drawer keeps its fixed size.",
+  "empty": "Add your first command button.",
+  "previous": "Previous",
+  "next": "Next",
+  "edit_help": "Click a button to edit it. Commands do not run in edit mode.",
+  "invalid_item": "Name and command are required. Check field limits in the README.",
+  "item_limit": "The drawer supports up to 200 items.",
+  "launch_failed": "The command could not be started.",
+  "storage_unavailable": "Cannot access plugin storage. Reopen the drawer to retry.",
+  "invalid_storage": "Unsupported or damaged items.json. The file has been preserved. Repair it and reopen the drawer.",
+  "storage_changed": "Storage changed elsewhere. Reopen the drawer before saving again.",
+  "storage_too_large": "Cannot encode the data, or it exceeds the 256 KiB storage limit.",
+  "save_failed": "Could not save. Your draft is retained; check storage access and retry."
+}

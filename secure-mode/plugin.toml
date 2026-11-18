@@ -1,0 +1,57 @@
+id = "io.soloev/secure-mode"
+name = "Secure Mode"
+version = "0.1.0"
+plugin_api = 46
+author = "io.soloev"
+license = "MIT"
+dependencies = ["python3"]
+tags = ["umbriel", "bar", "utility"]
+icon = "shield-lock"
+description = "Persist secure mode and expose a read-only Umbriel configuration through a private runtime link."
+
+[[widget]]
+id = "indicator"
+entry = "widget.luau"
+hover_highlight = false
+
+  [[widget.setting]]
+  key = "style"
+  type = "select"
+  label_key = "settings.style.label"
+  default = "dot"
+  options = [
+    { value = "dot", label_key = "settings.style.dot" },
+    { value = "capsule", label_key = "settings.style.capsule" },
+  ]
+
+  [[widget.setting]]
+  key = "text"
+  type = "string"
+  label_key = "settings.text.label"
+  default = "SECURE"
+  visible_when = { key = "style", values = ["capsule"] }
+
+  [[widget.setting]]
+  key = "close-style"
+  type = "select"
+  label_key = "settings.close_style.label"
+  default = "hidden"
+  options = [
+    { value = "hidden", label_key = "settings.close_style.hidden" },
+    { value = "capsule", label_key = "settings.style.capsule" },
+  ]
+
+  [[widget.setting]]
+  key = "close-text"
+  type = "string"
+  label_key = "settings.close_text.label"
+  default = "NORMAL"
+  visible_when = { key = "close-style", values = ["capsule"] }
+
+[[shortcut]]
+id = "toggle"
+entry = "shortcut.luau"
+
+[[service]]
+id = "service"
+entry = "service.luau"

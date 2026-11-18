@@ -25,3 +25,27 @@ description = "Pinned and running windows on the bar, with workspace groups and 
 plugin_api = 46
 tags = ["umbriel", "bar", "panel", "utility"]
 dependencies = ["umbriel"]
+
+[[plugin]]
+id = "io.soloev/buttons"
+name = "Buttons"
+version = "0.1.0"
+author = "io.soloev"
+license = "MIT"
+icon = "layout-grid"
+description = "A configurable drawer of shell-command buttons with a built-in editor."
+plugin_api = 46
+tags = ["bar", "panel", "utility"]
+dependencies = []
+
+[[plugin]]
+id = "io.soloev/secure-mode"
+name = "Secure Mode"
+version = "0.1.0"
+author = "io.soloev"
+license = "MIT"
+icon = "shield-lock"
+description = "Persist secure mode and expose a read-only Umbriel configuration through a private runtime link."
+plugin_api = 46
+tags = ["umbriel", "bar", "utility"]
+dependencies = ["python3"]
