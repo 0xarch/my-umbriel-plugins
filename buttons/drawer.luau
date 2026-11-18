@@ -8,6 +8,10 @@ local draft, editIndex, layoutDraft
 local revision = 0
 local pendingDelete = false
 local message = ""
+local focusMode = false
+local swapSource = nil
+local states = {}
+local opened = false
 local render
 
 local function tr(key)
@@ -36,6 +40,7 @@ local function grid()
   view = "grid"
   draft, layoutDraft = nil, nil
   pendingDelete = false
+  swapSource = nil
   message = ""
   render()
 end
@@ -46,9 +51,12 @@ local function openEditor(index)
   draft = {
     name = item and item.name or "", tooltip = item and item.tooltip or "",
     glyph = item and item.glyph or "terminal", command = item and item.action.command or "",
+    state_mode = item and item.state_mode == true or false,
+    default_status = item and item.default_status or 0,
   }
   revision = revision + 1
   pendingDelete = false
+  swapSource = nil
   message = ""
   view = "editor"
   render()
@@ -61,6 +69,7 @@ local function saveItem()
     name = draft.name, tooltip = draft.tooltip,
     glyph = draft.glyph:find("%S") and draft.glyph or "terminal",
     action = { type = "shell", command = draft.command },
+    state_mode = draft.state_mode, default_status = draft.default_status,
   }
   if not store.validateItem(item) then
     message = tr("invalid_item")
@@ -102,6 +111,7 @@ local function moveItem(delta)
   item.name, item.tooltip = draft.name, draft.tooltip
   item.glyph = draft.glyph:find("%S") and draft.glyph or "terminal"
   item.action.command = draft.command
+  item.state_mode, item.default_status = draft.state_mode, draft.default_status
   if not store.validateItem(item) then
     message = tr("invalid_item")
     render()
@@ -116,15 +126,86 @@ local function moveItem(delta)
   end
 end
 
+local function stateFor(item)
+  local state = states[item.id]
+  if not state or state.command ~= item.action.command or state.baseGlyph ~= item.glyph
+    or state.defaultStatus ~= (item.default_status or 0) or state.mode ~= (item.state_mode == true) then
+    state = { command = item.action.command, baseGlyph = item.glyph,
+      defaultStatus = item.default_status or 0, mode = item.state_mode == true,
+      status = item.default_status or 0, glyph = item.glyph, busy = false }
+    states[item.id] = state
+  end
+  return state
+end
+
+local function stateError()
+  message = tr("status_failed")
+  if focusMode and not editing and view == "grid" then
+    noctalia.notifyError(tr("title"), message)
+  end
+end
+
 local function launch(index)
   if editing then openEditor(index) return end
+  local item = data.items[index]
+  if item.state_mode then
+    local state = stateFor(item)
+    if state.busy then return end
+    state.busy = true
+    message = ""
+    local accepted = noctalia.runAsync(item.action.command, function(result)
+      -- Ignore results from an item that was deleted/reconfigured while running.
+      local current
+      for _, candidate in ipairs(data and data.items or {}) do
+        if candidate.id == item.id then current = candidate break end
+      end
+      if not current or stateFor(current) ~= state then return end
+      state.busy = false
+      local status, icon
+      if result.exitCode == 0 and not result.timedOut and not result.stdoutTruncated then
+        status, icon = store.parseStatus(result.stdout)
+      end
+      if status ~= nil then
+        state.status, state.glyph = status, icon or item.glyph
+      elseif opened then
+        stateError()
+      end
+      if opened then render() end
+    end, 10000)
+    if not accepted then
+      state.busy = false
+      stateError()
+    end
+    render()
+    return
+  end
   -- A string is intentionally passed verbatim to /bin/sh -c; no quoting or
   -- command interpolation by the plugin, no callback/timeout for long-lived apps.
   if noctalia.runAsync(data.items[index].action.command) then
     if data.close_on_run then panel.close() end
   else
     message = tr("launch_failed")
+    if focusMode then noctalia.notifyError(tr("title"), message) end
     render()
+  end
+end
+
+local function swapItem(index)
+  if not editing then return end
+  if swapSource == nil then
+    swapSource = index
+    message = ""
+    render()
+  elseif swapSource == index then
+    swapSource = nil
+    render()
+  else
+    local candidate = store.copy(data)
+    candidate.items[swapSource], candidate.items[index] = candidate.items[index], candidate.items[swapSource]
+    if commit(candidate) then
+      swapSource = nil
+      render()
+    end
   end
 end
 
@@ -158,6 +239,22 @@ local function editorNodes()
     field("name", "name"), field("tooltip", "tooltip"), field("glyph", "glyph"),
     field("command", "command", true),
     ui.label({ text = tr("command_help"), maxLines = 3, color = "on_surface_variant" }),
+    ui.row({ gap = 12, align = "center" }, {
+      ui.toggle({ key = "state-mode", checked = draft.state_mode, onChange = function(value)
+        draft.state_mode = value == "true"
+        render()
+      end }),
+      ui.label({ text = tr("state_mode"), color = "on_surface" }),
+    }),
+    ui.column({ gap = 6 }, {
+      ui.label({ text = tr("default_status"), color = "on_surface_variant" }),
+      ui.select({ key = "default-status", options = { tr("status_off"), tr("status_on") },
+        selectedIndex = draft.default_status, enabled = draft.state_mode, onChange = function(value)
+          draft.default_status = tonumber(value) or 0
+          render()
+        end }),
+    }),
+    ui.label({ text = tr("state_help"), maxLines = 5, color = "on_surface_variant" }),
   }
   if editIndex then
     table.insert(nodes, ui.row({ gap = 8 }, {
@@ -200,17 +297,22 @@ local function gridNodes()
   local pages = math.max(1, math.ceil(#data.items / capacity))
   page = math.min(page, pages)
   local nodes = {}
+  local focused = focusMode and not editing
+  local gridHeight = focused and (pages > 1 and 462 or 512) or 356
   if #data.items == 0 then
-    table.insert(nodes, ui.column({ key = "empty", height = 356, gap = 16, align = "center", justify = "center" }, {
+    local emptyNodes = {
       ui.glyph({ name = "layout-grid", size = 40, color = "primary" }),
       ui.label({ text = tr("empty"), color = "on_surface_variant" }),
-      button("first", "add", function() openEditor(nil) end, { glyph = "plus", variant = "primary" }),
-    }))
+    }
+    if not focused then
+      table.insert(emptyNodes, button("first", "add", function() openEditor(nil) end, { glyph = "plus", variant = "primary" }))
+    end
+    table.insert(nodes, ui.column({ key = "empty", height = gridHeight, gap = 16, align = "center", justify = "center" }, emptyNodes))
   else
     -- Bounded to at most 30 tiles. No application scan or icon-theme resolution.
     -- Manifest 560 - host padding 28 = 532 logical units, independent of ui_scale.
     local width = math.floor((532 - (data.columns - 1) * 8) / data.columns)
-    local height = math.floor((356 - (data.rows - 1) * 8) / data.rows)
+    local height = math.floor((gridHeight - (data.rows - 1) * 8) / data.rows)
     local rows = {}
     for row = 1, data.rows do
       local tiles = {}
@@ -218,16 +320,31 @@ local function gridNodes()
         local index = (page - 1) * capacity + (row - 1) * data.columns + column
         local item = data.items[index]
         if item then
-          table.insert(tiles, ui.column({
-            key = "item-" .. item.id, width = width, height = height,
-            gap = 6, padding = 6, align = "center", justify = "center",
-            fill = "surface_container_high", radius = 10,
-            tooltip = item.tooltip ~= "" and item.tooltip or item.name,
-            onClick = function() launch(index) end,
-          }, {
-            ui.glyph({ name = item.glyph, size = data.rows >= 4 and 20 or 30, color = "primary" }),
-            ui.label({ text = item.name, fontSize = 12, maxLines = data.rows >= 4 and 1 or 2,
-              maxWidth = width - 12, textAlign = "center", color = "on_surface" }),
+          local state = stateFor(item)
+          local active = item.state_mode and state.status == 1
+          -- Same transparent full-card button overlay as Better Launchpad:
+          -- flex containers cannot receive right-clicks. Keep the original
+          -- vertical icon/name layout and colors in a purely visual layer.
+          table.insert(tiles, ui.column({ key = "tile-" .. item.id, width = width, height = height }, {
+            ui.column({ key = "face-" .. item.id, width = width, height = height,
+              gap = 6, padding = 6, align = "center", justify = "center", radius = 10,
+              fill = active and "primary" or "surface_container_high",
+              border = swapSource == index and (active and "on_primary" or "primary") or "outline_variant",
+              borderWidth = swapSource == index and 2 or 0,
+              opacity = state.busy and not editing and 0.6 or 1,
+            }, {
+              ui.glyph({ name = state.glyph, size = data.rows >= 4 and 20 or 30,
+                color = active and "on_primary" or "primary" }),
+              ui.label({ text = item.name, fontSize = 12, maxLines = data.rows >= 4 and 1 or 2,
+                maxWidth = width - 12, textAlign = "center", color = active and "on_primary" or "on_surface" }),
+            }),
+            ui.button({ key = "item-" .. item.id, width = width, height = height,
+              translateY = -height, opacity = 0, variant = "ghost",
+              enabled = editing or not state.busy,
+              tooltip = item.tooltip ~= "" and item.tooltip or item.name,
+              onClick = function() launch(index) end,
+              onRightClick = function() swapItem(index) end,
+            }),
           }))
         else
           table.insert(tiles, ui.spacer({ key = "blank-" .. column, width = width, height = height }))
@@ -235,13 +352,15 @@ local function gridNodes()
       end
       table.insert(rows, ui.row({ key = "row-" .. row, height = height, gap = 8, align = "start" }, tiles))
     end
-    table.insert(nodes, ui.column({ key = "tiles", height = 356, gap = 8 }, rows))
+    table.insert(nodes, ui.column({ key = "tiles", height = gridHeight, gap = 8 }, rows))
   end
-  table.insert(nodes, ui.row({ key = "pagination", gap = 8, justify = "space_between", align = "center" }, {
-    button("previous", "previous", function() changePage(-1) end, { enabled = page > 1 }),
-    ui.label({ text = tostring(page) .. " / " .. tostring(pages), color = "on_surface_variant" }),
-    button("next", "next", function() changePage(1) end, { enabled = page < pages }),
-  }))
+  if not focused or pages > 1 then
+    table.insert(nodes, ui.row({ key = "pagination", gap = 8, justify = "space_between", align = "center" }, {
+      button("previous", "previous", function() changePage(-1) end, { enabled = page > 1 }),
+      ui.label({ text = tostring(page) .. " / " .. tostring(pages), color = "on_surface_variant" }),
+      button("next", "next", function() changePage(1) end, { enabled = page < pages }),
+    }))
+  end
   return ui.column({ key = "grid", flexGrow = 1, gap = 12 }, nodes)
 end
 
@@ -271,6 +390,7 @@ render = function()
       { glyph = "plus", enabled = #data.items < store.MAX_ITEMS }))
     table.insert(header, button("edit", editing and "done" or "edit", function()
       editing = not editing
+      swapSource = nil
       message = ""
       render()
     end, { selected = editing }))
@@ -280,13 +400,14 @@ render = function()
   if noctalia.getSetting("shell.show_close_buttons") ~= false then
     table.insert(header, ui.button({ key = "close", glyph = "x", tooltip = tr("close"), onClick = function() panel.close() end }))
   end
-  local nodes = {
-    ui.row({ key = "header", height = 38, gap = 8, align = "center" }, header),
-    ui.label({ key = "status", text = message ~= "" and message or
-      (view == "grid" and editing and tr("edit_help") or ""), color = message ~= "" and "error" or "on_surface_variant",
-      fontSize = 12, maxWidth = 532, maxLines = 2 }),
-    body,
-  }
+  local nodes = {}
+  if loadError or view ~= "grid" or not focusMode or editing then
+    table.insert(nodes, ui.row({ key = "header", height = 38, gap = 8, align = "center" }, header))
+    table.insert(nodes, ui.label({ key = "status", text = message ~= "" and message or
+      (view == "grid" and editing and tr(swapSource and "swap_help" or "edit_help") or ""),
+      color = message ~= "" and "error" or "on_surface_variant", fontSize = 12, maxWidth = 532, maxLines = 2 }))
+  end
+  table.insert(nodes, body)
   panel.render(ui.column({ key = "drawer", flexGrow = 1, gap = 12 }, nodes))
 end
 
@@ -295,16 +416,27 @@ function onOpen(_context)
   view, editing, page = "grid", false, 1
   draft, layoutDraft = nil, nil
   pendingDelete, message = false, ""
+  focusMode = noctalia.getConfig("focus_mode") == true
+  swapSource, opened = nil, true
+  -- Drop removed items and stale callbacks without losing completed session state.
+  local retained = {}
+  for _, item in ipairs(data and data.items or {}) do retained[item.id] = stateFor(item) end
+  states = retained
   render()
 end
 
 function onClose()
   -- Editors use explicit Save; closing or dismissing discards an unsaved draft.
   draft, layoutDraft = nil, nil
+  opened, swapSource = false, nil
 end
 
 function onKey(chord, pressed)
   if not pressed or loadError or view ~= "grid" then return end
-  if chord == "Prior" then changePage(-1)
+  if chord == "Ctrl+e" then
+    editing = not editing
+    swapSource, message = nil, ""
+    render()
+  elseif chord == "Prior" then changePage(-1)
   elseif chord == "Next" then changePage(1) end
 end

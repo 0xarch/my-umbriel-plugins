@@ -1,6 +1,6 @@
 id = "io.soloev/buttons"
 name = "Buttons"
-version = "0.1.1"
+version = "0.2.0"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"
@@ -8,6 +8,13 @@ dependencies = []
 tags = ["bar", "panel", "utility"]
 icon = "layout-grid"
 description = "A configurable drawer of shell-command buttons with a built-in editor."
+
+[[setting]]
+key = "focus_mode"
+type = "bool"
+label_key = "settings.focus_mode.label"
+description_key = "settings.focus_mode.description"
+default = false
 
 [[widget]]
 id = "buttons"
@@ -34,4 +41,4 @@ height = 540
 placement = "attached"
 position = "top_right"
 dismiss_on_outside_click = true
-capture_keys = ["Prior", "Next"]
+capture_keys = ["Prior", "Next", "Ctrl+e"]

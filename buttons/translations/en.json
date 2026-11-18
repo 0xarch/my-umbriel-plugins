@@ -3,6 +3,10 @@
   "settings": {
     "glyph": {
       "label": "Bar icon"
+    },
+    "focus_mode": {
+      "label": "Focus mode",
+      "description": "Show only the grid and necessary pagination. Ctrl+E temporarily toggles edit mode."
     }
   },
   "add": "Add",
@@ -28,7 +32,7 @@
   "empty": "Add your first command button.",
   "previous": "Previous",
   "next": "Next",
-  "edit_help": "Click a button to edit it. Commands do not run in edit mode.",
+  "edit_help": "Click to edit. Right-click two cards to swap them; right-click the selected card to cancel.",
   "invalid_item": "Name and command are required. Check field limits in the README.",
   "item_limit": "The drawer supports up to 200 items.",
   "launch_failed": "The command could not be started.",
@@ -36,5 +40,12 @@
   "invalid_storage": "Unsupported or damaged items.json. The file has been preserved. Repair it and reopen the drawer.",
   "storage_changed": "Storage changed elsewhere. Reopen the drawer before saving again.",
   "storage_too_large": "Cannot encode the data, or it exceeds the 256 KiB storage limit.",
-  "save_failed": "Could not save. Your draft is retained; check storage access and retry."
+  "save_failed": "Could not save. Your draft is retained; check storage access and retry.",
+  "state_mode": "State mode",
+  "default_status": "Default status (uses the configured icon)",
+  "status_off": "0 — Normal",
+  "status_on": "1 — Enabled",
+  "state_help": "Click to run and read stdout: 0 or 1, optionally followed by an icon name (e.g. 1 moon). State commands keep the drawer open; timeout is 10 seconds. The default is used on plugin reload.",
+  "status_failed": "State command failed or returned invalid output. Expected: 0 or 1, optionally followed by an icon name.",
+  "swap_help": "Right-click another card to swap; right-click the selected card again to cancel. You can change pages."
 }

@@ -20,6 +20,8 @@ function M.validateItem(item)
     and text(item.name, 160, true) and text(item.tooltip, 512, false)
     and text(item.glyph, 80, true) and type(item.action) == "table"
     and item.action.type == "shell" and text(item.action.command, 16384, true)
+    and (item.state_mode == nil or type(item.state_mode) == "boolean")
+    and (item.default_status == nil or integer(item.default_status, 0, 1))
 end
 
 function M.validate(data)
@@ -50,9 +52,18 @@ function M.copy(data)
     table.insert(copy.items, {
       id = item.id, name = item.name, tooltip = item.tooltip, glyph = item.glyph,
       action = { type = "shell", command = item.action.command },
+      state_mode = item.state_mode == true, default_status = item.default_status or 0,
     })
   end
   return copy
+end
+
+function M.parseStatus(output)
+  if type(output) ~= "string" or #output > 256 then return nil end
+  local status, icon = output:match("^%s*([01])[ \t]+([^%s]+)%s*$")
+  if not status then status = output:match("^%s*([01])%s*$") end
+  if not status or (icon and not text(icon, 80, true)) then return nil end
+  return tonumber(status), icon
 end
 
 function M.allocateId(data)
