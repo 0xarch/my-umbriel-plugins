@@ -1,6 +1,6 @@
 # Secure Mode
 
-`io.soloev/secure-mode`，Noctalia v5 / plugin API 46，依赖 `python3`（只使用标准库）。
+`io.soloev/secure-mode`，Noctalia v5 / plugin API 46，依赖 `python3`（只使用标准库）和 `umbriel`。
 
 ## 工作方式
 
@@ -10,7 +10,8 @@
 - 关闭：只删除上述托管链接，保留源文件和源文件的 `0400` 权限。再次编辑源文件前，用户需自行恢复其写权限。
 - 操作成功后才确认新状态。状态文件通过同目录临时文件原子替换；保存失败会尝试回滚链接。进程中断后，下次启动依据最后保存的状态恢复。
 - 不覆盖普通文件、目录或指向其他目标的链接；异常会通知用户。未知状态显示警告，点击警告可重试恢复。不会自动循环重试。
-- 这只控制配置片段的链接；Umbriel 是否读取该片段、何时重新读取，由用户现有的 Umbriel 配置和重载机制决定。插件不修改主配置，也不主动重载合成器。
+- 每次开启、关闭或启动恢复，在文件操作完成后执行一次 `umbriel msg config-reload`；发生写入失败时，先完成清理/回滚，再重载最终文件状态。重载在同一操作锁内进行，完成前保持忙碌，不会与下次开关交错。
+- 重载失败或超过 5 秒会通知用户，保留实际链接和已保存状态；可通过 `restore` 重试。用户仍需在 Umbriel 主配置中安排读取该配置片段；插件不修改主配置，也不监控外部编辑器的文件变更。
 
 ## 外观和操作
 
@@ -53,7 +54,7 @@ python3 -B harness/secure-mode/test_secure_mode.py -v
 lua harness/secure-mode/plugin.lua
 ```
 
-文件系统测试只使用 `/tmp/opencode/secure-mode-*` 内的模拟 HOME、数据目录和临时目录，不读取或修改用户真实配置。Lua harness 使用 mock API，不能替代真实 Luau 和 GUI 验收。
+文件系统测试只使用 `/tmp/opencode/secure-mode-*` 内的模拟 HOME、数据目录和临时目录，并 mock 重载子进程，不读取或修改用户真实配置，也不会重载运行实例。Lua harness 使用 mock API，不能替代真实 Luau 和 GUI 验收。
 
 用户人工验收：
 
@@ -63,5 +64,6 @@ lua harness/secure-mode/plugin.lua
 4. 关闭：`close-style=hidden` 应完全隐藏；改成 `capsule` 后显示独立 `close-text` 的浅色胶囊，运行链接已删除。
 5. 分别在开启、关闭时重启 Noctalia；应恢复对应状态。多屏点击任一实例时其他实例及控制中心应同步。
 6. 若使用竖向栏或很长的自定义文本，检查栏厚度下的实际裁切；可选用圆点或缩短文本。
+7. 开启、关闭或重启恢复后，检查 Umbriel 依赖该配置片段的行为是否随重载生效；重载出错时应出现通知，可用 `restore` 重试。
 
 删除/禁用插件不会自动关闭安全模式或删除现存链接；应先执行 `off`。临时目录及锁文件在关闭后保留，避免并发锁失效。

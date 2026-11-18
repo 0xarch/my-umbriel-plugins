@@ -41,11 +41,11 @@ dependencies = []
 [[plugin]]
 id = "io.soloev/secure-mode"
 name = "Secure Mode"
-version = "0.1.0"
+version = "0.1.1"
 author = "io.soloev"
 license = "MIT"
 icon = "shield-lock"
 description = "Persist secure mode and expose a read-only Umbriel configuration through a private runtime link."
 plugin_api = 46
 tags = ["umbriel", "bar", "utility"]
-dependencies = ["python3"]
+dependencies = ["python3", "umbriel"]

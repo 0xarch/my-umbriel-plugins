@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import secrets
 import stat
+import subprocess
 import sys
 
 
@@ -138,6 +139,19 @@ def commit(data, runtime, source, enabled):
             pass
 
 
+def reload_config():
+    try:
+        result = subprocess.run(
+            ["umbriel", "msg", "config-reload"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("umbriel msg config-reload failed: " + str(exc)) from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError("umbriel msg config-reload failed: " + (detail or "exit " + str(result.returncode)))
+
+
 def apply(action, data_path, home, tmp_root="/tmp"):
     """Explicit roots are for isolated harness fixtures; CLI uses fixed roots."""
     source = Path(home) / ".config/umbriel" / NAME
@@ -158,7 +172,22 @@ def apply(action, data_path, home, tmp_root="/tmp"):
             data = stack.enter_context(private_dir(str(data_path), create=False))
             saved = read_state(data)
             enabled = saved if action == "restore" else action == "on"
-            commit(data, runtime, source, enabled)
+            has_link(runtime, source)  # Reject unrelated destinations before any mutation or reload.
+            failure = None
+            try:
+                commit(data, runtime, source, enabled)
+            except Exception as exc:
+                failure = exc
+            # Reload only after all writes/cleanup/rollback have finished, while
+            # still holding the lock. Also reconcile an unchanged startup restore.
+            try:
+                reload_config()
+            except Exception as exc:
+                if failure is not None:
+                    raise RuntimeError(str(failure) + "; " + str(exc)) from exc
+                raise
+            if failure is not None:
+                raise failure
             return {"ok": True, "enabled": enabled}
         except Exception as exc:
             actual = None
