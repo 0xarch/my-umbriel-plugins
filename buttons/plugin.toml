@@ -1,6 +1,6 @@
 id = "io.soloev/buttons"
 name = "Buttons"
-version = "0.2.0"
+version = "0.2.1"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"

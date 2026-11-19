@@ -5,7 +5,7 @@
 [[plugin]]
 id = "io.soloev/better-launchpad"
 name = "Better Launchpad"
-version = "0.6.9"
+version = "0.6.10"
 author = "io.soloev"
 license = "MIT"
 icon = "rocket"
@@ -17,7 +17,7 @@ dependencies = []
 [[plugin]]
 id = "io.soloev/better-taskbar"
 name = "Better Taskbar"
-version = "0.5.4"
+version = "0.5.5"
 author = "io.soloev"
 license = "MIT"
 icon = "layout-bottombar"
@@ -29,7 +29,7 @@ dependencies = ["umbriel"]
 [[plugin]]
 id = "io.soloev/buttons"
 name = "Buttons"
-version = "0.2.0"
+version = "0.2.1"
 author = "io.soloev"
 license = "MIT"
 icon = "layout-grid"
@@ -41,7 +41,7 @@ dependencies = []
 [[plugin]]
 id = "io.soloev/secure-mode"
 name = "Secure Mode"
-version = "0.1.1"
+version = "0.1.2"
 author = "io.soloev"
 license = "MIT"
 icon = "shield-lock"

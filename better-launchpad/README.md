@@ -1,10 +1,14 @@
 # Better Launchpad
 
-The built-in Noctalia launcher's Simple layout as a standalone plugin: a search
-field, category chips, a five-column app grid or a compact list, and the same
-provider prefixes for calculator, emoji, wallpapers, session actions, and open
-windows. It follows the user's existing launcher settings instead of keeping a
-second set of options.
+Launcher but more powerful.
+
+This launchpad supports the following extended feature compared to the built-in launcher:
+* Sorting applications
+* Creating folders
+
+It also includes almost all features the built-in launcher has, like calculator.
+
+Exception: The plugins that extends the built-in launcher's functionality, like Zed Provider, cannot be used on this one.
 
 ## Plugin
 

@@ -1,9 +1,10 @@
 # Better Taskbar
 
-The built-in taskbar as a standalone plugin: a strip of pinned and running window
-icons on the bar, optional workspace capsules, and a right-click menu with focus,
-minimize, close, and pin actions. It reads Umbriel's IPC window and workspace
-streams, so it needs an Umbriel session.
+An usable taskbar replacement for the built-in one.
+
+Supports auto merging, which is that multiple windows of one app only shown one icon.
+
+Only works under Umbriel compositor.
 
 ## Plugin
 
