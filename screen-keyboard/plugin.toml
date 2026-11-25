@@ -1,0 +1,34 @@
+id = "io.soloev/screen-keyboard"
+name = "Screen Keyboard"
+version = "0.1.0"
+plugin_api = 46
+author = "io.soloev"
+license = "MIT"
+dependencies = ["python3"]
+tags = ["bar", "utility", "accessibility"]
+icon = "keyboard"
+description = "A US 87-key on-screen keyboard using uinput without taking keyboard focus."
+
+[[widget]]
+id = "keyboard"
+entry = "button.luau"
+
+[[shortcut]]
+id = "keyboard"
+entry = "shortcut.luau"
+
+[[service]]
+id = "service"
+entry = "service.luau"
+
+[[layer]]
+id = "keyboard"
+entry = "keyboard.luau"
+layer = "overlay"
+anchors = ["bottom"]
+width = 1060
+height = 0
+keyboard = "none"
+exclusive_zone = 0
+output = "focused"
+margins = { bottom = 8 }

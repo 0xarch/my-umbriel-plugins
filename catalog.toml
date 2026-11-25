@@ -49,3 +49,15 @@ description = "Persist secure mode and expose a read-only Umbriel configuration 
 plugin_api = 46
 tags = ["umbriel", "bar", "utility"]
 dependencies = ["python3", "umbriel"]
+
+[[plugin]]
+id = "io.soloev/screen-keyboard"
+name = "Screen Keyboard"
+version = "0.1.0"
+author = "io.soloev"
+license = "MIT"
+icon = "keyboard"
+description = "A US 87-key on-screen keyboard using uinput without taking keyboard focus."
+plugin_api = 46
+tags = ["bar", "utility", "accessibility"]
+dependencies = ["python3"]
