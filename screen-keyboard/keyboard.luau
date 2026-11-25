@@ -1,5 +1,7 @@
 --!nonstrict
 local snapshot = noctalia.state.get("screen-keyboard.state") or { mods = {} }
+local captureReady = false
+local pendingDrag = nil
 local function key(code, label, units)
   return { code = code, label = label, units = units or 1 }
 end
@@ -34,6 +36,38 @@ local NAV = {
 
 local function request(action, code)
   noctalia.state.set("screen-keyboard.request", { action = action, code = code })
+end
+
+local function dragRequest(action, x, y)
+  noctalia.state.set("screen-keyboard.request", { action = action, x = tonumber(x), y = tonumber(y) })
+end
+
+-- Named handlers keep their identity across renders, so updates during capture
+-- do not cancel the host's pointer session.
+function onDragDown(x, y)
+  captureReady = false
+  pendingDrag = nil
+  dragRequest("drag-start", x, y)
+end
+function onDragMove(x, y)
+  if snapshot.dragging and captureReady then pendingDrag = { x = x, y = y } end
+end
+function onDragUp(x, y)
+  pendingDrag = nil
+  dragRequest(captureReady and "drag-end" or "drag-cancel", x, y)
+end
+function onDragCancel()
+  pendingDrag = nil
+  dragRequest("drag-cancel")
+end
+function onFrameTick(_delta)
+  if snapshot.dragging and captureReady and pendingDrag ~= nil then
+    local move = pendingDrag
+    pendingDrag = nil
+    dragRequest("drag-move", move.x, move.y)
+  end
+  captureReady = snapshot.dragging == true
+  layer.setNeedsFrameTick(snapshot.dragging == true)
 end
 
 local function render()
@@ -73,6 +107,24 @@ local function render()
   end
   local status = snapshot.error or noctalia.tr(snapshot.ready and "hint" or "starting")
   local children = {
+    ui.column({ key = "drag-grip", width = width - 24, height = 24,
+      fill = "surface_container_highest", radius = 5 }, {
+      ui.pixelStream({ key = "drag-pointer", path = snapshot.drag_path or "",
+        width = width - 24, height = 24,
+        -- Expand only the transform, not layout. Otherwise the parent clamps
+        -- the view's measured width to the small grip and corrupts coordinates.
+        scaleX = snapshot.dragging and snapshot.placement.screen_width / snapshot.placement.scale / (width - 24) or 1,
+        scaleY = snapshot.dragging and snapshot.placement.screen_height / snapshot.placement.scale / 24 or 1,
+        translateX = snapshot.dragging and ((snapshot.placement.screen_width / snapshot.placement.scale - (width - 24)) / 2
+          - snapshot.placement.left / snapshot.placement.scale - 12) or 0,
+        translateY = snapshot.dragging and ((snapshot.placement.screen_height / snapshot.placement.scale - 24) / 2
+          - snapshot.placement.top / snapshot.placement.scale - 12) or 0,
+        fit = "stretch", onPointerDown = "onDragDown", onPointerMove = "onDragMove",
+        onPointerUp = "onDragUp", onPointerCancel = "onDragCancel" }),
+      ui.label({ key = "drag-label", text = noctalia.tr(snapshot.drag_path and "drag" or "starting"),
+        fontSize = 12, color = "on_surface_variant", maxLines = 1,
+        translateY = -20 }),
+    }),
     ui.row({ key = "header", width = width - 24, height = 32, align = "center", gap = 8 }, {
       ui.label({ key = "title", text = noctalia.tr("title"), fontWeight = "medium", fontSize = 13,
         maxWidth = 120, maxLines = 1 }),
@@ -112,11 +164,22 @@ local function render()
     })
   end
   for _, row in ipairs(rows) do table.insert(children, row) end
-  layer.render(ui.column({ key = "keyboard", width = width, padding = 12, gap = 4,
-    radius = 12, fill = "surface_container", border = "outline_variant", borderWidth = 1 }, children))
+  local keyboard = ui.column({ key = "keyboard", width = width, padding = 12, gap = 4,
+    translateX = snapshot.dragging and snapshot.placement.left / snapshot.placement.scale or 0,
+    translateY = snapshot.dragging and snapshot.placement.top / snapshot.placement.scale or 0,
+    radius = 12, fill = "surface_container", border = "outline_variant", borderWidth = 1 }, children)
+  -- The host stretches its root to the surface width. This transparent wrapper
+  -- keeps the keyboard card at its own width during full-output capture.
+  layer.render(ui.column({ key = "surface", align = "start",
+    width = snapshot.dragging and snapshot.placement.screen_width / snapshot.placement.scale or width }, { keyboard }))
 end
 
 noctalia.state.watch("screen-keyboard.state", function(value)
-  if type(value) == "table" then snapshot = value; render() end
+  if type(value) == "table" then
+    local wasDragging = snapshot.dragging
+    snapshot = value
+    render()
+    if snapshot.dragging and not wasDragging then layer.setNeedsFrameTick(true) end
+  end
 end)
 render()

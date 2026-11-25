@@ -1,5 +1,6 @@
 {
   "title": "Screen Keyboard",
+  "drag": "⠿ Hold here to move the keyboard",
   "hint": "US · tap modifiers, then a key · input method stays active",
   "starting": "Starting virtual keyboard…",
   "clear": "Clear modifiers",

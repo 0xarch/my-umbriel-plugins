@@ -1,6 +1,6 @@
 id = "io.soloev/screen-keyboard"
 name = "Screen Keyboard"
-version = "0.2.1"
+version = "0.3.0"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"
@@ -19,7 +19,7 @@ entry = "shortcut.luau"
 
 [[service]]
 id = "service"
-entry = "controller.luau"
+entry = "keyboard-service.luau"
 
 [[layer]]
 id = "keyboard"

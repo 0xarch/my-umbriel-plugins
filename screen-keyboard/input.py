@@ -1,5 +1,6 @@
 """One persistent uinput keyboard. Never opens or records physical input devices."""
 
+import contextlib
 import fcntl
 import json
 import os
@@ -10,6 +11,8 @@ import stat
 import struct
 import sys
 import time
+
+from drag_pixels import DragPixels
 
 
 KEYS = set(range(1, 59)) | set(range(59, 71)) | {87, 88, 97, 99, 100, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 119, 125, 126, 127}
@@ -67,6 +70,7 @@ def serve(path):
     lock = os.open(str(path) + ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     device = None
     bound = False
+    pixels = None
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -88,8 +92,12 @@ def serve(path):
         bound = True
         os.chmod(path, 0o600)
         server.listen(8)
+        try:
+            pixels = DragPixels(directory / "drag.sock")
+        except Exception as exc:
+            message({"event": "drag-error", "error": str(exc)})
         time.sleep(0.2)  # Allow libinput to discover this device before first use.
-        message({"event": "ready"})
+        message({"event": "ready", "drag_path": pixels.path if pixels is not None else None})
         while True:
             connection, _ = server.accept()
             with connection:
@@ -116,6 +124,9 @@ def serve(path):
                 except OSError:
                     pass
     finally:
+        if pixels is not None:
+            with contextlib.suppress(OSError):
+                pixels.close()
         server.close()
         if device is not None:
             os.close(device)  # Closing destroys the virtual device and all its key state.
