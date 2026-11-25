@@ -68,7 +68,7 @@ local function configureGeometry()
   -- Output dimensions are logical pixels. Layer extents use those pixels,
   -- while ui.* geometry is multiplied by accessibility.ui_scale.
   local width = math.min(geometry.width, math.max(1, (screenWidth - 16) / scale))
-  local fixedHeight = snapshot.adjusting and 150 or 78
+  local fixedHeight = snapshot.adjusting and 152 or 80
   local keyHeight = math.min(geometry.key_height, math.max(16, ((screenHeight - 16) / scale - fixedHeight) / 6))
   local height = fixedHeight + keyHeight * 6
   local surfaceWidth = math.max(1, math.ceil(width * scale))

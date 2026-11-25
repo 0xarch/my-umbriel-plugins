@@ -6,6 +6,7 @@
   "retry": "Retry input device",
   "hide": "Hide keyboard",
   "adjust": "Adjust position and size",
+  "adjust_button": "Position / size",
   "position": "Position",
   "center": "Center",
   "bottom": "Bottom",

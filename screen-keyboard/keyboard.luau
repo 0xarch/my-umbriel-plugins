@@ -73,18 +73,21 @@ local function render()
   end
   local status = snapshot.error or noctalia.tr(snapshot.ready and "hint" or "starting")
   local children = {
-    ui.row({ key = "header", height = 30, align = "center", gap = 8 }, {
-      ui.glyph({ name = "keyboard", size = 18 }),
-      ui.label({ text = noctalia.tr("title"), fontWeight = "medium", fontSize = 13 }),
-      ui.label({ text = status, fontSize = 11, color = snapshot.error and "error" or "on_surface_variant",
-        visible = width >= 900, maxLines = 1, maxWidth = math.max(50, width - 420), flexGrow = 1 }),
-      ui.row({ flexGrow = 1 }, {}),
-      ui.button({ text = noctalia.tr("clear"), onClick = function() request("clear") end }),
-      ui.button({ glyph = "adjustments-horizontal", tooltip = noctalia.tr("adjust"),
+    ui.row({ key = "header", width = width - 24, height = 32, align = "center", gap = 8 }, {
+      ui.label({ key = "title", text = noctalia.tr("title"), fontWeight = "medium", fontSize = 13,
+        maxWidth = 120, maxLines = 1 }),
+      ui.button({ key = "adjust-button", text = noctalia.tr("adjust_button"), width = 120, height = 30,
+        fontSize = 12, tooltip = noctalia.tr("adjust"),
         onClick = function() request("adjust") end }),
-      ui.button({ glyph = "refresh", tooltip = noctalia.tr("retry"),
+      ui.label({ key = "status", text = status, fontSize = 11, color = snapshot.error and "error" or "on_surface_variant",
+        visible = width >= 1100, maxLines = 1, maxWidth = math.max(50, width - 600) }),
+      ui.row({ key = "header-space", flexGrow = 1 }, {}),
+      ui.button({ key = "clear", text = noctalia.tr("clear"), width = 100, height = 30, fontSize = 12,
+        onClick = function() request("clear") end }),
+      ui.button({ key = "retry", glyph = "refresh", width = 32, height = 30, tooltip = noctalia.tr("retry"),
         onClick = function() request("retry") end }),
-      ui.button({ glyph = "close", tooltip = noctalia.tr("hide"), onClick = function() request("hide") end }),
+      ui.button({ key = "close", glyph = "close", width = 32, height = 30,
+        tooltip = noctalia.tr("hide"), onClick = function() request("hide") end }),
     }),
   }
   if snapshot.adjusting then
