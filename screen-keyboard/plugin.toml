@@ -1,6 +1,6 @@
 id = "io.soloev/screen-keyboard"
 name = "Screen Keyboard"
-version = "0.1.0"
+version = "0.1.1"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"
@@ -10,11 +10,11 @@ icon = "keyboard"
 description = "A US 87-key on-screen keyboard using uinput without taking keyboard focus."
 
 [[widget]]
-id = "keyboard"
+id = "button"
 entry = "button.luau"
 
 [[shortcut]]
-id = "keyboard"
+id = "toggle"
 entry = "shortcut.luau"
 
 [[service]]
