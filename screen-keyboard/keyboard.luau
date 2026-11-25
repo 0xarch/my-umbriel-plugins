@@ -39,8 +39,8 @@ end
 local function render()
   local width = snapshot.width or 1060
   local unit = (width - 24) / 18.5
-  local keyHeight = 40
-  local fontSize = math.max(8, math.min(12, unit * 0.24))
+  local keyHeight = snapshot.key_height or 48
+  local fontSize = math.max(8, math.min(18, unit * 0.28, keyHeight * 0.32))
   local rows = {}
   for index, row in ipairs(ROWS) do
     local nodes = {}
@@ -77,13 +77,37 @@ local function render()
       ui.glyph({ name = "keyboard", size = 18 }),
       ui.label({ text = noctalia.tr("title"), fontWeight = "medium", fontSize = 13 }),
       ui.label({ text = status, fontSize = 11, color = snapshot.error and "error" or "on_surface_variant",
-        maxLines = 1, maxWidth = math.max(50, width - 350), flexGrow = 1 }),
+        visible = width >= 900, maxLines = 1, maxWidth = math.max(50, width - 420), flexGrow = 1 }),
+      ui.row({ flexGrow = 1 }, {}),
       ui.button({ text = noctalia.tr("clear"), onClick = function() request("clear") end }),
+      ui.button({ glyph = "adjustments-horizontal", tooltip = noctalia.tr("adjust"),
+        onClick = function() request("adjust") end }),
       ui.button({ glyph = "refresh", tooltip = noctalia.tr("retry"),
         onClick = function() request("retry") end }),
       ui.button({ glyph = "close", tooltip = noctalia.tr("hide"), onClick = function() request("hide") end }),
     }),
   }
+  if snapshot.adjusting then
+    local function control(text, action, tooltip)
+      return ui.button({ text = text, tooltip = tooltip or text, onClick = function() request(action) end })
+    end
+    local geometry = snapshot.geometry or { width = 1060, key_height = 48 }
+    children[#children + 1] = ui.row({ key = "position-controls", height = 32, gap = 6, align = "center" }, {
+      ui.label({ text = noctalia.tr("position"), fontSize = 12 }),
+      control("←", "left"), control("→", "right"), control("↑", "up"), control("↓", "down"),
+      control(noctalia.tr("center"), "center"), control(noctalia.tr("bottom"), "bottom"),
+    })
+    children[#children + 1] = ui.row({ key = "size-controls", height = 32, gap = 6, align = "center" }, {
+      ui.label({ text = noctalia.tr("width"), fontSize = 12 }),
+      control("−", "narrower", noctalia.tr("narrower")),
+      ui.label({ text = tostring(geometry.width), fontSize = 12 }),
+      control("+", "wider", noctalia.tr("wider")),
+      ui.label({ text = noctalia.tr("key_height"), fontSize = 12 }),
+      control("−", "shorter", noctalia.tr("shorter")),
+      ui.label({ text = tostring(geometry.key_height), fontSize = 12 }),
+      control("+", "taller", noctalia.tr("taller")), control(noctalia.tr("reset"), "reset"),
+    })
+  end
   for _, row in ipairs(rows) do table.insert(children, row) end
   layer.render(ui.column({ key = "keyboard", width = width, padding = 12, gap = 4,
     radius = 12, fill = "surface_container", border = "outline_variant", borderWidth = 1 }, children))

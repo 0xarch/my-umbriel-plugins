@@ -7,6 +7,82 @@ local socketPath = nil
 local helperPath = nil
 local MODS = { [29] = true, [42] = true, [54] = true, [56] = true,
   [97] = true, [100] = true, [125] = true, [126] = true }
+local geometry = { width = 1060, key_height = 48, x = 50, y = 100 }
+local geometryLoaded = false
+
+local function clamp(value, low, high)
+  return math.max(low, math.min(high, value))
+end
+
+local function loadGeometry()
+  if geometryLoaded then return end
+  local data = noctalia.pluginDataDir()
+  if data == nil then return end
+  geometryLoaded = true
+  local raw = noctalia.readFile(data .. "/geometry.json")
+  if raw == nil then return end
+  local value = noctalia.json.decode(raw)
+  if type(value) ~= "table" then return end
+  for key, bounds in pairs({ width = { 640, 2400 }, key_height = { 32, 96 }, x = { 0, 100 }, y = { 0, 100 } }) do
+    local number = value[key]
+    if type(number) == "number" and number == number then
+      geometry[key] = clamp(math.floor(number), bounds[1], bounds[2])
+    end
+  end
+end
+
+local function saveGeometry()
+  local data, err = noctalia.pluginDataDir()
+  if data == nil then return false, err end
+  local encoded = noctalia.json.encode(geometry)
+  if encoded == nil then return false, noctalia.tr("geometry_error") end
+  local temporary = data .. "/geometry.json.tmp"
+  local ok, message = noctalia.writeFile(temporary, encoded)
+  if not ok then return false, message end
+  return noctalia.renameFile(temporary, data .. "/geometry.json")
+end
+
+local function configureGeometry()
+  local scale = math.max(0.1, tonumber(noctalia.getSetting("accessibility.ui_scale")) or 1)
+  local focused = snapshot.output or noctalia.focusedOutputName()
+  local screenWidth, screenHeight = 1920, 1080
+  local outputs = noctalia.outputs()
+  local selected = nil
+  for _, output in ipairs(outputs) do
+    if output.name == focused then
+      selected = output
+      break
+    end
+  end
+  if selected == nil then
+    for _, output in ipairs(outputs) do
+      if output.focused then selected = output; break end
+    end
+    selected = selected or outputs[1]
+  end
+  if selected ~= nil then
+    screenWidth, screenHeight = selected.width, selected.height
+    focused = selected.name
+    snapshot.output = focused
+  end
+  -- Output dimensions are logical pixels. Layer extents use those pixels,
+  -- while ui.* geometry is multiplied by accessibility.ui_scale.
+  local width = math.min(geometry.width, math.max(1, (screenWidth - 16) / scale))
+  local fixedHeight = snapshot.adjusting and 150 or 78
+  local keyHeight = math.min(geometry.key_height, math.max(16, ((screenHeight - 16) / scale - fixedHeight) / 6))
+  local height = fixedHeight + keyHeight * 6
+  local surfaceWidth = math.max(1, math.ceil(width * scale))
+  local surfaceHeight = math.max(1, math.ceil(height * scale))
+  local left = math.floor(8 + math.max(0, screenWidth - surfaceWidth - 16) * geometry.x / 100)
+  local top = math.floor(8 + math.max(0, screenHeight - surfaceHeight - 16) * geometry.y / 100)
+  snapshot.width = width
+  snapshot.key_height = keyHeight
+  snapshot.geometry = { width = geometry.width, key_height = geometry.key_height, x = geometry.x, y = geometry.y }
+  noctalia.layer.configure("keyboard", { anchors = { "top", "left" },
+    width = surfaceWidth, height = surfaceHeight,
+    margins = { top = top, left = left, right = 0, bottom = 0 },
+    keyboard = "none", output = focused or "focused", exclusiveZone = 0 })
+end
 
 local function publish()
   snapshot.pending = #queue + (running and 1 or 0)
@@ -98,19 +174,9 @@ local function visibility(shown)
   snapshot.shown = shown
   snapshot.mods = {}
   if shown then
-    local width = 1060
-    local scale = math.max(0.1, tonumber(noctalia.getSetting("accessibility.ui_scale")) or 1)
-    local focused = noctalia.focusedOutputName()
-    for _, output in ipairs(noctalia.outputs()) do
-      if output.name == focused then
-        -- outputs().width is already logical; only the plugin UI scale remains.
-        width = math.min(width, math.floor((output.width - 24) / scale))
-      end
-    end
-    width = math.max(360, width)
-    snapshot.width = width
-    noctalia.layer.configure("keyboard", { width = math.floor(width * scale), height = 0,
-      keyboard = "none", output = "focused", exclusiveZone = 0 })
+    loadGeometry()
+    snapshot.output = noctalia.focusedOutputName()
+    configureGeometry()
     noctalia.layer.show("keyboard")
     start()
   else
@@ -120,6 +186,30 @@ local function visibility(shown)
   publish()
 end
 
+local function adjust(action)
+  if action == "adjust" then
+    snapshot.adjusting = not snapshot.adjusting
+  elseif action == "left" then geometry.x = clamp(geometry.x - 5, 0, 100)
+  elseif action == "right" then geometry.x = clamp(geometry.x + 5, 0, 100)
+  elseif action == "up" then geometry.y = clamp(geometry.y - 5, 0, 100)
+  elseif action == "down" then geometry.y = clamp(geometry.y + 5, 0, 100)
+  elseif action == "wider" then geometry.width = clamp(geometry.width + 80, 640, 2400)
+  elseif action == "narrower" then geometry.width = clamp(geometry.width - 80, 640, 2400)
+  elseif action == "taller" then geometry.key_height = clamp(geometry.key_height + 8, 32, 96)
+  elseif action == "shorter" then geometry.key_height = clamp(geometry.key_height - 8, 32, 96)
+  elseif action == "center" then geometry.x, geometry.y = 50, 50
+  elseif action == "bottom" then geometry.x, geometry.y = 50, 100
+  elseif action == "reset" then geometry = { width = 1060, key_height = 48, x = 50, y = 100 }
+  else return false end
+  if action ~= "adjust" then
+    local ok, err = saveGeometry()
+    if not ok then noctalia.notifyError(noctalia.tr("title"), err or noctalia.tr("geometry_error")) end
+  end
+  configureGeometry()
+  publish()
+  return true
+end
+
 local function request(value)
   if type(value) ~= "table" then return end
   if value.action == "show" then visibility(true)
@@ -127,6 +217,7 @@ local function request(value)
   elseif value.action == "toggle" then visibility(not snapshot.shown)
   elseif value.action == "retry" then start()
   elseif value.action == "clear" then snapshot.mods = {}; publish()
+  elseif snapshot.shown and adjust(value.action) then return
   elseif value.action == "key" and snapshot.shown then
     local code = tonumber(value.code)
     if code == nil or code ~= math.floor(code) then return end
@@ -152,5 +243,11 @@ end
 noctalia.state.watch("screen-keyboard.request", request)
 function onIpc(event, _payload)
   request({ action = event })
+end
+function onOutputsChanged()
+  if snapshot.shown then configureGeometry(); publish() end
+end
+function onConfigChanged()
+  if snapshot.shown then configureGeometry(); publish() end
 end
 publish()
