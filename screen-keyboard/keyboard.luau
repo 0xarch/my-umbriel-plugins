@@ -50,7 +50,16 @@ function onDragDown(x, y)
   dragRequest("drag-start", x, y)
 end
 function onDragMove(x, y)
-  if snapshot.dragging and captureReady then pendingDrag = { x = x, y = y } end
+  if snapshot.dragging and captureReady then
+    if captureReady == true then
+      -- Deliver the reference immediately, before frame coalescing can replace
+      -- it with a later point. No visible movement occurs for this sample.
+      captureReady = "calibrated"
+      dragRequest("drag-move", x, y)
+    else
+      pendingDrag = { x = x, y = y }
+    end
+  end
 end
 function onDragUp(x, y)
   pendingDrag = nil
@@ -66,7 +75,8 @@ function onFrameTick(_delta)
     pendingDrag = nil
     dragRequest("drag-move", move.x, move.y)
   end
-  captureReady = snapshot.dragging == true
+  if not snapshot.dragging then captureReady = false
+  elseif not captureReady then captureReady = true end
   layer.setNeedsFrameTick(snapshot.dragging == true)
 end
 

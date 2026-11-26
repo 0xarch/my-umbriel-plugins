@@ -210,17 +210,23 @@ local function dragRequest(value)
   if value.action == "drag-start" and snapshot.drag_path ~= nil and placement ~= nil and dragging == nil then
     local x, y = tonumber(value.x), tonumber(value.y)
     if x == nil or y == nil then return end
-    dragging = { offset_x = (12 + clamp(x, 0, 1) * (snapshot.width - 24)) * placement.scale,
-      offset_y = (12 + clamp(y, 0, 1) * 24) * placement.scale }
+    -- wl_pointer coordinates during an implicit grab need not adopt the new
+    -- layer origin immediately. Preserve the card's position and calibrate the
+    -- first sample from the expanded capture view instead of assuming globals.
+    dragging = { left = placement.left, top = placement.top }
     configureGeometry()
     publish()
   elseif (value.action == "drag-move" or value.action == "drag-end" or value.action == "drag-cancel") and dragging ~= nil then
     local x, y = tonumber(value.x), tonumber(value.y)
     if value.action ~= "drag-cancel" and x ~= nil and y ~= nil then
+      if dragging.reference_x == nil then
+        dragging.reference_x = x
+        dragging.reference_y = y
+      end
       local rangeX = math.max(0, placement.screen_width - placement.width - 16)
       local rangeY = math.max(0, placement.screen_height - placement.height - 16)
-      local left = x * placement.screen_width - dragging.offset_x
-      local top = y * placement.screen_height - dragging.offset_y
+      local left = dragging.left + (x - dragging.reference_x) * placement.screen_width
+      local top = dragging.top + (y - dragging.reference_y) * placement.screen_height
       if rangeX > 0 then geometry.x = clamp((left - 8) * 100 / rangeX, 0, 100) end
       if rangeY > 0 then geometry.y = clamp((top - 8) * 100 / rangeY, 0, 100) end
     end
