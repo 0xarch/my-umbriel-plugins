@@ -31,6 +31,9 @@ local function loadGeometry()
       geometry[key] = clamp((key == "x" or key == "y") and number or math.floor(number), bounds[1], bounds[2])
     end
   end
+  for _, key in ipairs({ "left", "top" }) do
+    if type(value[key]) == "number" and value[key] == value[key] then geometry[key] = clamp(value[key], -65536, 65536) end
+  end
 end
 
 local function saveGeometry()
@@ -75,8 +78,10 @@ local function configureGeometry()
   local height = fixedHeight + keyHeight * 6
   local surfaceWidth = math.max(1, math.ceil(width * scale))
   local surfaceHeight = math.max(1, math.ceil(height * scale))
-  local left = math.floor(8 + math.max(0, screenWidth - surfaceWidth - 16) * geometry.x / 100)
-  local top = math.floor(8 + math.max(0, screenHeight - surfaceHeight - 16) * geometry.y / 100)
+  local left = math.floor(clamp(geometry.left or (8 + math.max(0, screenWidth - surfaceWidth - 16) * geometry.x / 100),
+    60 - surfaceWidth, screenWidth - 60))
+  local top = math.floor(clamp(geometry.top or (8 + math.max(0, screenHeight - surfaceHeight - 16) * geometry.y / 100),
+    8, screenHeight - 60))
   snapshot.width = width
   snapshot.key_height = keyHeight
   snapshot.geometry = { width = geometry.width, key_height = geometry.key_height, x = geometry.x, y = geometry.y }
@@ -84,12 +89,16 @@ local function configureGeometry()
     screen_width = screenWidth, screen_height = screenHeight, scale = scale }
   snapshot.placement = placement
   snapshot.dragging = dragging ~= nil
-  -- During capture only, use the output as a fixed pointer coordinate space.
-  -- The keyboard moves inside it; the captured view never follows the cursor.
+  -- Never move or resize a surface holding an implicit pointer grab. Only the
+  -- click-through preview moves until release; captured coordinates stay local.
+  local capture = dragging and dragging.capture or placement
   noctalia.layer.configure("keyboard", { anchors = { "top", "left" },
-    width = dragging and screenWidth or surfaceWidth, height = dragging and screenHeight or surfaceHeight,
-    margins = { top = dragging and 0 or top, left = dragging and 0 or left, right = 0, bottom = 0 },
+    width = capture.width, height = capture.height,
+    margins = { top = capture.top, left = capture.left, right = 0, bottom = 0 },
     keyboard = "none", output = focused or "focused", exclusiveZone = 0 })
+  noctalia.layer.configure("preview", { anchors = { "top", "left" }, width = screenWidth, height = screenHeight,
+    margins = { top = 0, left = 0, right = 0, bottom = 0 }, keyboard = "none", clickThrough = true,
+    output = focused or "focused", exclusiveZone = 0 })
 end
 
 local function publish()
@@ -193,6 +202,7 @@ local function visibility(shown)
     snapshot.output = noctalia.focusedOutputName()
     configureGeometry()
     noctalia.layer.show("keyboard")
+    noctalia.layer.show("preview")
     start()
   else
     if dragging ~= nil then
@@ -202,6 +212,7 @@ local function visibility(shown)
     end
     queue = {}
     noctalia.layer.hide("keyboard")
+    noctalia.layer.hide("preview")
   end
   publish()
 end
@@ -210,25 +221,20 @@ local function dragRequest(value)
   if value.action == "drag-start" and snapshot.drag_path ~= nil and placement ~= nil and dragging == nil then
     local x, y = tonumber(value.x), tonumber(value.y)
     if x == nil or y == nil then return end
-    -- wl_pointer coordinates during an implicit grab need not adopt the new
-    -- layer origin immediately. Preserve the card's position and calibrate the
-    -- first sample from the expanded capture view instead of assuming globals.
-    dragging = { left = placement.left, top = placement.top }
+    -- The expanded capture plane spans [-screen, 2*screen] on each axis.
+    -- Its origin and the actual wl_surface origin remain fixed for the grab.
+    dragging = { capture = placement, left = placement.left, top = placement.top,
+      reference_x = ((12 + clamp(x, 0, 1) * (snapshot.width - 24)) * placement.scale + placement.screen_width) / (3 * placement.screen_width),
+      reference_y = ((12 + clamp(y, 0, 1) * 24) * placement.scale + placement.screen_height) / (3 * placement.screen_height) }
     configureGeometry()
     publish()
   elseif (value.action == "drag-move" or value.action == "drag-end" or value.action == "drag-cancel") and dragging ~= nil then
     local x, y = tonumber(value.x), tonumber(value.y)
     if value.action ~= "drag-cancel" and x ~= nil and y ~= nil then
-      if dragging.reference_x == nil then
-        dragging.reference_x = x
-        dragging.reference_y = y
-      end
-      local rangeX = math.max(0, placement.screen_width - placement.width - 16)
-      local rangeY = math.max(0, placement.screen_height - placement.height - 16)
-      local left = dragging.left + (x - dragging.reference_x) * placement.screen_width
-      local top = dragging.top + (y - dragging.reference_y) * placement.screen_height
-      if rangeX > 0 then geometry.x = clamp((left - 8) * 100 / rangeX, 0, 100) end
-      if rangeY > 0 then geometry.y = clamp((top - 8) * 100 / rangeY, 0, 100) end
+      geometry.left = clamp(dragging.left + (x - dragging.reference_x) * 3 * placement.screen_width,
+        60 - placement.width, placement.screen_width - 60)
+      geometry.top = clamp(dragging.top + (y - dragging.reference_y) * 3 * placement.screen_height,
+        8, placement.screen_height - 60)
     end
     if value.action ~= "drag-move" then
       dragging = nil
@@ -243,16 +249,16 @@ end
 local function adjust(action)
   if action == "adjust" then
     snapshot.adjusting = not snapshot.adjusting
-  elseif action == "left" then geometry.x = clamp(geometry.x - 5, 0, 100)
-  elseif action == "right" then geometry.x = clamp(geometry.x + 5, 0, 100)
-  elseif action == "up" then geometry.y = clamp(geometry.y - 5, 0, 100)
-  elseif action == "down" then geometry.y = clamp(geometry.y + 5, 0, 100)
+  elseif action == "left" then geometry.left = placement.left - placement.screen_width * 0.05
+  elseif action == "right" then geometry.left = placement.left + placement.screen_width * 0.05
+  elseif action == "up" then geometry.top = placement.top - placement.screen_height * 0.05
+  elseif action == "down" then geometry.top = placement.top + placement.screen_height * 0.05
   elseif action == "wider" then geometry.width = clamp(geometry.width + 80, 640, 2400)
   elseif action == "narrower" then geometry.width = clamp(geometry.width - 80, 640, 2400)
   elseif action == "taller" then geometry.key_height = clamp(geometry.key_height + 8, 32, 96)
   elseif action == "shorter" then geometry.key_height = clamp(geometry.key_height - 8, 32, 96)
-  elseif action == "center" then geometry.x, geometry.y = 50, 50
-  elseif action == "bottom" then geometry.x, geometry.y = 50, 100
+  elseif action == "center" then geometry.left, geometry.top = nil, nil; geometry.x, geometry.y = 50, 50
+  elseif action == "bottom" then geometry.left, geometry.top = nil, nil; geometry.x, geometry.y = 50, 100
   elseif action == "reset" then geometry = { width = 1060, key_height = 48, x = 50, y = 100 }
   else return false end
   if action ~= "adjust" then

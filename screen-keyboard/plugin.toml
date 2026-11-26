@@ -1,6 +1,6 @@
 id = "io.soloev/screen-keyboard"
 name = "Screen Keyboard"
-version = "0.3.1"
+version = "0.3.2"
 plugin_api = 46
 author = "io.soloev"
 license = "MIT"
@@ -32,3 +32,15 @@ keyboard = "none"
 exclusive_zone = 0
 output = "focused"
 margins = { bottom = 8 }
+
+[[layer]]
+id = "preview"
+entry = "preview.luau"
+layer = "overlay"
+anchors = ["top", "left"]
+width = 1060
+height = 600
+keyboard = "none"
+click_through = true
+exclusive_zone = 0
+output = "focused"
