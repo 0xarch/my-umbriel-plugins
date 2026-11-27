@@ -71,6 +71,7 @@ def serve(path):
     device = None
     bound = False
     pixels = None
+    right_pixels = None
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -96,8 +97,13 @@ def serve(path):
             pixels = DragPixels(directory / "drag.sock")
         except Exception as exc:
             message({"event": "drag-error", "error": str(exc)})
+        try:
+            right_pixels = DragPixels(directory / "drag-right.sock")
+        except Exception as exc:
+            message({"event": "drag-error", "error": str(exc)})
         time.sleep(0.2)  # Allow libinput to discover this device before first use.
-        message({"event": "ready", "drag_path": pixels.path if pixels is not None else None})
+        message({"event": "ready", "drag_path": pixels.path if pixels is not None else None,
+                 "drag_right_path": right_pixels.path if right_pixels is not None else None})
         while True:
             connection, _ = server.accept()
             with connection:
@@ -124,6 +130,9 @@ def serve(path):
                 except OSError:
                     pass
     finally:
+        if right_pixels is not None:
+            with contextlib.suppress(OSError):
+                right_pixels.close()
         if pixels is not None:
             with contextlib.suppress(OSError):
                 pixels.close()

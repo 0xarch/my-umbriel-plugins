@@ -4,8 +4,8 @@ local snapshot = noctalia.state.get("screen-keyboard.state") or { mods = {} }
 local pendingDrag = nil
 local captureReady = false
 local pointerMoved = false
-local function dragRequest(action, x, y)
-  noctalia.state.set("screen-keyboard.request", { action = action, x = tonumber(x), y = tonumber(y) })
+local function dragRequest(action, x, y, side)
+  noctalia.state.set("screen-keyboard.request", { action = action, x = tonumber(x), y = tonumber(y), side = side })
 end
 
 -- Named handlers keep their identity across renders, so updates during capture
@@ -15,6 +15,12 @@ function onDragDown(x, y)
   pointerMoved = false
   pendingDrag = nil
   dragRequest("drag-start", x, y)
+end
+function onRightDragDown(x, y)
+  captureReady = false
+  pointerMoved = false
+  pendingDrag = nil
+  dragRequest("drag-start", x, y, "right")
 end
 function onDragMove(x, y)
   if snapshot.dragging and captureReady then

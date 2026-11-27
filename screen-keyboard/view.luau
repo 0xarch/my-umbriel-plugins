@@ -70,39 +70,35 @@ local function build(snapshot, preview)
     append(NAV[index], "nav-")
     rows[#rows + 1] = ui.row({ key = "row-" .. index, height = keyHeight }, nodes)
   end
-  local status = snapshot.error or noctalia.tr(snapshot.ready and "hint" or "starting")
-  local children = {
-    ui.column({ key = "drag-grip", width = width - 24, height = 24,
+  local gripWidth = math.max(1, (width - 24 - 124) / 2)
+  local function grip(side, offset)
+    local path = side == "right" and snapshot.drag_right_path or snapshot.drag_path
+    return ui.column({ key = "drag-" .. side, width = gripWidth, height = 34,
       fill = "surface_container_highest", radius = 5 }, {
-      ui.pixelStream({ key = "drag-pointer", path = (not preview and snapshot.drag_path) or "",
-        width = width - 24, height = 24,
-        -- Expand only the transform, not layout. Otherwise the parent clamps
-        -- the view's measured width to the small grip and corrupts coordinates.
-        scaleX = snapshot.dragging and 3 * snapshot.placement.screen_width / snapshot.placement.scale / (width - 24) or 1,
-        scaleY = snapshot.dragging and 3 * snapshot.placement.screen_height / snapshot.placement.scale / 24 or 1,
-        translateX = snapshot.dragging and (snapshot.placement.screen_width / snapshot.placement.scale / 2 - (width - 24) / 2 - 12) or 0,
-        translateY = snapshot.dragging and (snapshot.placement.screen_height / snapshot.placement.scale / 2 - 12 - 12) or 0,
-        fit = "stretch", onPointerDown = "onDragDown", onPointerMove = "onDragMove",
-        onPointerUp = "onDragUp", onPointerCancel = "onDragCancel" }),
-      ui.label({ key = "drag-label", text = noctalia.tr(snapshot.drag_path and "drag" or "starting"),
-        fontSize = 12, color = "on_surface_variant", maxLines = 1,
-        translateY = -20 }),
-    }),
-    ui.row({ key = "header", width = width - 24, height = 32, align = "center", gap = 8 }, {
-      ui.label({ key = "title", text = noctalia.tr("title"), fontWeight = "medium", fontSize = 13,
-        maxWidth = 120, maxLines = 1 }),
-      ui.button({ key = "adjust-button", text = noctalia.tr("adjust_button"), width = 120, height = 30,
-        fontSize = 12, tooltip = noctalia.tr("adjust"),
-        onClick = function() request("adjust") end }),
-      ui.label({ key = "status", text = status, fontSize = 11, color = snapshot.error and "error" or "on_surface_variant",
-        visible = width >= 1100, maxLines = 1, maxWidth = math.max(50, width - 600) }),
-      ui.row({ key = "header-space", flexGrow = 1 }, {}),
-      ui.button({ key = "clear", text = noctalia.tr("clear"), width = 100, height = 30, fontSize = 12,
-        onClick = function() request("clear") end }),
-      ui.button({ key = "retry", glyph = "refresh", width = 32, height = 30, tooltip = noctalia.tr("retry"),
-        onClick = function() request("retry") end }),
-      ui.button({ key = "close", glyph = "close", width = 32, height = 30,
-        tooltip = noctalia.tr("hide"), onClick = function() request("hide") end }),
+      ui.pixelStream({ key = "pointer-" .. side, path = (not preview and path) or "",
+        width = gripWidth, height = 34,
+        scaleX = snapshot.dragging and 3 * snapshot.placement.screen_width / snapshot.placement.scale / gripWidth or 1,
+        scaleY = snapshot.dragging and 3 * snapshot.placement.screen_height / snapshot.placement.scale / 34 or 1,
+        translateX = snapshot.dragging and (snapshot.placement.screen_width / snapshot.placement.scale / 2 - gripWidth / 2 - offset) or 0,
+        translateY = snapshot.dragging and (snapshot.placement.screen_height / snapshot.placement.scale / 2 - 17 - 12) or 0,
+        fit = "stretch", onPointerDown = side == "right" and "onRightDragDown" or "onDragDown",
+        onPointerMove = "onDragMove", onPointerUp = "onDragUp", onPointerCancel = "onDragCancel" }),
+      ui.label({ key = "grip-label-" .. side, text = "⠿", fontSize = 16,
+        color = "on_surface_variant", textAlign = "center", maxWidth = gripWidth, translateY = -28 }),
+    })
+  end
+  local children = {
+    ui.row({ key = "toolbar", width = width - 24, height = 34, align = "center", gap = 8 }, {
+      grip("left", 12),
+      ui.row({ key = "toolbar-actions", width = 108, height = 34, gap = 6, align = "center" }, {
+        ui.button({ key = "adjust-button", glyph = "arrows-move", width = 32, height = 32,
+          tooltip = noctalia.tr("adjust"), onClick = function() request("adjust") end }),
+        ui.button({ key = "clear", glyph = "filter-cancel", width = 32, height = 32,
+          tooltip = noctalia.tr("clear"), onClick = function() request("clear") end }),
+        ui.button({ key = "close", glyph = "close", width = 32, height = 32,
+          tooltip = snapshot.error or noctalia.tr("hide"), onClick = function() request("hide") end }),
+      }),
+      grip("right", 12 + gripWidth + 124),
     }),
   }
   if snapshot.adjusting then

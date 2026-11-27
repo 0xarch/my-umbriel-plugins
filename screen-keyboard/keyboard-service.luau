@@ -73,7 +73,7 @@ local function configureGeometry()
   -- Output dimensions are logical pixels. Layer extents use those pixels,
   -- while ui.* geometry is multiplied by accessibility.ui_scale.
   local width = math.min(geometry.width, math.max(1, (screenWidth - 16) / scale))
-  local fixedHeight = snapshot.adjusting and 180 or 108
+  local fixedHeight = snapshot.adjusting and 154 or 82
   local keyHeight = math.min(geometry.key_height, math.max(16, ((screenHeight - 16) / scale - fixedHeight) / 6))
   local height = fixedHeight + keyHeight * 6
   local surfaceWidth = math.max(1, math.ceil(width * scale))
@@ -141,6 +141,7 @@ local function start()
       snapshot.caps = false
       snapshot.error = nil
       snapshot.drag_path = value.drag_path
+      snapshot.drag_right_path = value.drag_right_path
       publish()
     elseif value.event == "error" then
       starting = false
@@ -150,6 +151,7 @@ local function start()
       starting = false
       snapshot.ready = false
       snapshot.drag_path = nil
+      snapshot.drag_right_path = nil
       if dragging ~= nil then
         dragging = nil
         saveGeometry()
@@ -218,14 +220,18 @@ local function visibility(shown)
 end
 
 local function dragRequest(value)
-  if value.action == "drag-start" and snapshot.drag_path ~= nil and placement ~= nil and dragging == nil then
+  if value.action == "drag-start" and placement ~= nil and dragging == nil
+    and ((value.side == "right" and snapshot.drag_right_path ~= nil)
+      or (value.side ~= "right" and snapshot.drag_path ~= nil)) then
     local x, y = tonumber(value.x), tonumber(value.y)
     if x == nil or y == nil then return end
     -- The expanded capture plane spans [-screen, 2*screen] on each axis.
     -- Its origin and the actual wl_surface origin remain fixed for the grab.
+    local gripWidth = math.max(1, (snapshot.width - 24 - 124) / 2)
+    local offset = value.side == "right" and (12 + gripWidth + 124) or 12
     dragging = { capture = placement, left = placement.left, top = placement.top,
-      reference_x = ((12 + clamp(x, 0, 1) * (snapshot.width - 24)) * placement.scale + placement.screen_width) / (3 * placement.screen_width),
-      reference_y = ((12 + clamp(y, 0, 1) * 24) * placement.scale + placement.screen_height) / (3 * placement.screen_height) }
+      reference_x = ((offset + clamp(x, 0, 1) * gripWidth) * placement.scale + placement.screen_width) / (3 * placement.screen_width),
+      reference_y = ((12 + clamp(y, 0, 1) * 34) * placement.scale + placement.screen_height) / (3 * placement.screen_height) }
     configureGeometry()
     publish()
   elseif (value.action == "drag-move" or value.action == "drag-end" or value.action == "drag-cancel") and dragging ~= nil then
